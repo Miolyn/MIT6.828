@@ -192,12 +192,17 @@ cga_putc(int c)
 	}
 
 	// What is the purpose of this?
+	// 显示缓冲区满了
 	if (crt_pos >= CRT_SIZE) {
 		int i;
-
+		// memmove(void *dst, const void *src, size_t n) 
+		// 从crt_buf + CRT_COLS向crt_buf移动除最后一行外的数据
+		// 相当于控制台最上面一行清空，然后最下面新起一行，就是整个控制台向下翻了一行
 		memmove(crt_buf, crt_buf + CRT_COLS, (CRT_SIZE - CRT_COLS) * sizeof(uint16_t));
+		// 移动完之后，还得把最后一行，即[CRT_SOZE-CRT_COLS, CRT_SIZE)这个区间的格子全部换成空白符 ' '。
 		for (i = CRT_SIZE - CRT_COLS; i < CRT_SIZE; i++)
 			crt_buf[i] = 0x0700 | ' ';
+		// buf区的光标也要上移
 		crt_pos -= CRT_COLS;
 	}
 
@@ -447,7 +452,7 @@ cons_init(void)
 
 
 // `High'-level console I/O.  Used by readline and cprintf.
-
+// 效果是打印一个字符
 void
 cputchar(int c)
 {
