@@ -8,17 +8,12 @@
 
 #include <inc/memlayout.h>
 #include <inc/assert.h>
-<<<<<<< HEAD
 struct Env;
-
-=======
-
 
 // 与entry.S相对应，bootstacktop就是内核栈的栈顶
 // # Set the stack pointer
 //	movl	$(bootstacktop),%esp
 // 估计bootstack就是栈底了，中间隔着KSTKSIZE这么大的空间，
->>>>>>> lab2
 extern char bootstacktop[], bootstack[];
 
 extern struct PageInfo *pages;
@@ -72,17 +67,13 @@ void	page_decref(struct PageInfo *pp);
 
 void	tlb_invalidate(pde_t *pgdir, void *va);
 
-<<<<<<< HEAD
 int	user_mem_check(struct Env *env, const void *va, size_t len, int perm);
 void	user_mem_assert(struct Env *env, const void *va, size_t len, int perm);
-
-=======
 
 
 
 // 将pp对应的地址减去page基地址，就得到pp在物理地址中相对于0地址的位置
 // 然后左移位12位，就得到该页的物理地址了
->>>>>>> lab2
 static inline physaddr_t
 page2pa(struct PageInfo *pp)
 {
