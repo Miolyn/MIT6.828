@@ -8,7 +8,10 @@
 
 #include <inc/memlayout.h>
 #include <inc/assert.h>
-
+// 与entry.S相对应，bootstacktop就是内核栈的栈顶
+// # Set the stack pointer
+//	movl	$(bootstacktop),%esp
+// 估计bootstack就是栈底了，中间隔着KSTKSIZE这么大的空间，
 extern char bootstacktop[], bootstack[];
 
 extern struct PageInfo *pages;
@@ -62,6 +65,8 @@ void	page_decref(struct PageInfo *pp);
 
 void	tlb_invalidate(pde_t *pgdir, void *va);
 
+// 将pp对应的地址减去page基地址，就得到pp在物理地址中相对于0地址的位置
+// 然后左移位12位，就得到该页的物理地址了
 static inline physaddr_t
 page2pa(struct PageInfo *pp)
 {
@@ -75,7 +80,9 @@ pa2page(physaddr_t pa)
 		panic("pa2page called with invalid pa");
 	return &pages[PGNUM(pa)];
 }
-
+// 先使用page2pa根据PageInfo的地址得到该页在物理地址中的地址
+// 然后使用KADDR获得这个物理地址对应的kernel地址(pa+KERNBASE)
+// 方便使用c语言对物理地址进行操作
 static inline void*
 page2kva(struct PageInfo *pp)
 {

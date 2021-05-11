@@ -11,7 +11,9 @@ pte_t entry_pgtable[NPTENTRIES];
 // virtual addresses [0, 4MB) to physical addresses [0, 4MB); this
 // region is critical for a few instructions in entry.S and then we
 // never use it again.
-//
+// entry.S映射第一个4MB物理内存到KERNBASE处的虚拟内存。选择4MB因为这正好就是一个1K页表的空间。
+// 4MB对于entry.S的一点点指令来说已经够用了。
+// 
 // Page directories (and page tables), must start on a page boundary,
 // hence the "__aligned__" attribute.  Also, because of restrictions
 // related to linking and static initializers, we use "x + PTE_P"
@@ -19,8 +21,14 @@ pte_t entry_pgtable[NPTENTRIES];
 // you should use "|" to combine flags.
 __attribute__((__aligned__(PGSIZE))) pde_t entry_pgdir[NPDENTRIES] = {
     // Map VA's [0, 4MB) to PA's [0, 4MB)
+    // 相当于entry_pgdir[0] = ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P
+    // 将0-4MB映射到0-4MB
+    // entry_pgtable就是页表的首地址，因为C代码链接到KERNBASE处，所以要减去KERNBASE
     [0] = ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P,
     // Map VA's [KERNBASE, KERNBASE+4MB) to PA's [0, 4MB)
+    // 相当于entry_pgdir[KERNBASE >> PDXSHIFT] = ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P + PTE_W
+    // 将KERNBASE开始的4MB映射到0-4MB处
+    // entry_pgtable就是页表的首地址，因为C代码链接到KERNBASE处，所以要减去KERNBASE
     [KERNBASE >> PDXSHIFT] =
         ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P + PTE_W};
 

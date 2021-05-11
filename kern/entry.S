@@ -51,6 +51,8 @@ entry:
 	# physical addresses [0, 4MB).  This 4MB region will be
 	# sufficient until we set up our real page table in mem_init
 	# in lab 2.
+	# 现在还没有开启虚拟内存，我们运行在实地址上，但是C代码链接运行在KERNBASE+1MB上，所以现在要建立一个暂时的页表映射[0,4MB)->[KERNBASE,KERNBASE+4MB)
+	# 等到mem_init再设置完全版的页表
 
 	# Load the physical address of entry_pgdir into cr3.  entry_pgdir
 	# is defined in entrypgdir.c. 也表的定义在entrypgdir.c中有写，这里相当于把entry_pgtable的物理地址给了cr3
