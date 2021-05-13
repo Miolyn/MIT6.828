@@ -58,6 +58,9 @@ static const char *trapname(int trapno)
 	return "(unknown trap)";
 }
 
+#define make_gate(name, is_trap, dpl) \
+	void name##_HANDLER (); \
+	SETGATE(idt[name], is_trap, GD_KT, name##_HANDLER, dpl)
 
 void
 trap_init(void)
@@ -65,7 +68,41 @@ trap_init(void)
 	extern struct Segdesc gdt[];
 
 	// LAB 3: Your code here.
-
+	extern long entryPointOfTraps[][2];
+	int i;
+	for(i = 0; i <= 20; ++i){
+		if(entryPointOfTraps[i][1] == T_BRKPT || entryPointOfTraps[i][1] == T_SYSCALL){
+			SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 3);
+		} 
+		// 如果在用户程序中int 13想要触发缺页中断就将这个缺页的处理段设置为3用户态也能访问，但实际上这样是不科学的。
+		// 缺页只能由操作系统来进行处理，所以需要设置dpl为0，内核权限级。如果用户态想要触发缺页中断的话就会转变成int 13 General Protection
+		// else if(entryPointOfTraps[i][1] == T_PGFLT){
+		// 	SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 3);
+		// }
+		else SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 0);
+	}
+	/*
+	make_gate(T_DIVIDE, 0, 0);
+	make_gate(T_DEBUG, 0, 0);
+	make_gate(T_NMI, 0, 0);
+	make_gate(T_BRKPT, 0, 0);
+	make_gate(T_OFLOW, 0, 0);
+	make_gate(T_BOUND, 0, 0);
+	make_gate(T_ILLOP, 0, 0);
+	make_gate(T_DEVICE, 0, 0);
+	make_gate(T_DBLFLT, 0, 0);
+	make_gate(T_TSS, 0, 0);
+	make_gate(T_SEGNP, 0, 0);
+	make_gate(T_STACK, 0, 0);
+	make_gate(T_GPFLT, 0, 0);
+	make_gate(T_PGFLT, 0, 0);
+	make_gate(T_FPERR, 0, 0);
+	make_gate(T_ALIGN, 0, 0);
+	make_gate(T_MCHK, 0, 0);
+	make_gate(T_SIMDERR, 0, 0);
+	make_gate(T_SYSCALL, 1, 3);
+	make_gate(T_DEFAULT, 0, 0);
+	*/
 	// Per-CPU setup 
 	trap_init_percpu();
 }
@@ -144,6 +181,30 @@ trap_dispatch(struct Trapframe *tf)
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
 
+	if(tf->tf_trapno == T_BRKPT || tf->tf_trapno == T_DEBUG){
+		monitor(tf);
+		return;
+	}
+	switch (tf->tf_trapno)
+	{
+	case T_SYSCALL:
+		tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx, 
+				tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+		return;
+	case T_PGFLT:
+		cprintf("\ninto T_PGFLT handler\n");
+		page_fault_handler(tf);
+		return;
+		break;
+	case T_BRKPT:
+		monitor(tf);
+		return;
+	case T_DEBUG:
+		break;
+	default:
+		break;
+	}
+
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
 	if (tf->tf_cs == GD_KT)
@@ -202,7 +263,13 @@ page_fault_handler(struct Trapframe *tf)
 	fault_va = rcr2();
 
 	// Handle kernel-mode page faults.
-
+	// 虽然user/softint是通过int指令，想要触发page fault，
+	// 但是，由于user/softint运行在用户态下，
+	//而page fault的Interrupt descriptor中的DPL标识调用page fault的handler function需要内核级别特权，
+	// 即0，因此，根据Intel IA-32 developer’s manual，会由硬件检测出general protection exception
+	if((tf->tf_cs & 3) == 0){
+		panic(":( Your kernel triger a page fault at va@0x%08x !Bad kernel", fault_va);
+	}
 	// LAB 3: Your code here.
 
 	// We've already handled kernel-mode exceptions, so if we get here,

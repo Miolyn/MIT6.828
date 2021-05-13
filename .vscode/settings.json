@@ -8,6 +8,9 @@
         "console.h": "c",
         "monitor.h": "c",
         "stdio.h": "c",
-        "memlayout.h": "c"
+        "memlayout.h": "c",
+        "mmu.h": "c",
+        "syscall.h": "c",
+        "pmap.h": "c"
     }
 }

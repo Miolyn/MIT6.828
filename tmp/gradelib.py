@@ -263,7 +263,10 @@ QEMU appears to already be running.  Please exit it if possible or use
         self.proc = Popen(cmd, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT,
                           stdin=subprocess.PIPE)
+        # Accumulated output as a string
         self.output = ""
+        # Accumulated output as a bytearray
+        self.outbytes = bytearray()
         self.on_output = []
 
     @staticmethod
@@ -284,11 +287,12 @@ QEMU appears to already be running.  Please exit it if possible or use
             return self.proc.stdout.fileno()
 
     def handle_read(self):
-        buf = os.read(self.proc.stdout.fileno(), 4096).decode("utf-8")
-        self.output += buf
+        buf = os.read(self.proc.stdout.fileno(), 4096)
+        self.outbytes.extend(buf)
+        self.output = self.outbytes.decode("utf-8", "replace")
         for callback in self.on_output:
             callback(buf)
-        if buf == "":
+        if buf == b"":
             self.wait()
             return
 
@@ -296,6 +300,10 @@ QEMU appears to already be running.  Please exit it if possible or use
         if self.proc:
             self.proc.wait()
             self.proc = None
+
+    def kill(self):
+        if self.proc:
+            self.proc.terminate()
 
 class GDBClient(object):
     def __init__(self, port, timeout=15):
@@ -317,7 +325,7 @@ class GDBClient(object):
 
     def handle_read(self):
         try:
-            data = self.sock.recv(4096).decode("utf-8")
+            data = self.sock.recv(4096).decode("ascii", "replace")
         except socket.error:
             data = ""
         if data == "":
@@ -339,7 +347,7 @@ class GDBClient(object):
 
     def __send(self, cmd):
         packet = "$%s#%02x" % (cmd, sum(map(ord, cmd)) % 256)
-        self.sock.sendall(packet.encode("utf-8"))
+        self.sock.sendall(packet.encode("ascii"))
 
     def __send_break(self):
         self.sock.sendall(b"\x03")
@@ -347,16 +355,13 @@ class GDBClient(object):
     def close(self):
         if self.sock:
             self.sock.close()
+            self.sock = None
 
     def cont(self):
         self.__send("c")
 
     def breakpoint(self, addr):
         self.__send("Z1,%x,1" % addr)
-
-    def kill(self):
-        self.__send_break()
-        self.__send("k")
 
 
 ##################################################################
@@ -417,7 +422,7 @@ class Runner():
             try:
                 if self.gdb is None:
                     sys.exit(1)
-                self.gdb.kill()
+                self.qemu.kill()
                 self.__react(self.reactors, 5)
                 self.gdb.close()
                 self.qemu.wait()
@@ -429,13 +434,13 @@ Failed to shutdown QEMU.  You might need to 'killall qemu' or
                 raise
 
     def __monitor_start(self, output):
-        if "\n" in output:
+        if b"\n" in output:
             try:
                 self.gdb = GDBClient(self.qemu.get_gdb_port(), timeout=2)
                 raise TerminateTest
             except socket.error:
                 pass
-        if output == "":
+        if not len(output):
             raise TerminateTest
 
     def __react(self, reactors, timeout):
@@ -500,7 +505,7 @@ def save(path):
             os.unlink(save_path)
             print("    (Old %s failure log removed)" % save_path)
 
-    f = open(path, "w")
+    f = open(path, "wb")
     return setup_save
 
 def stop_breakpoint(addr):
@@ -522,11 +527,12 @@ def call_on_line(regexp, callback):
     matching 'regexp'."""
 
     def setup_call_on_line(runner):
-        buf = [""]
-        def handle_output(output, buf=buf):
-            buf[0] += output
-            while "\n" in buf[0]:
-                line, buf[0] = buf[0].split("\n", 1)
+        buf = bytearray()
+        def handle_output(output):
+            buf.extend(output)
+            while b"\n" in buf:
+                line, buf[:] = buf.split(b"\n", 1)
+                line = line.decode("utf-8", "replace")
                 if re.match(regexp, line):
                     callback(line)
         runner.qemu.on_output.append(handle_output)
