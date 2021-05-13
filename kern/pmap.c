@@ -618,7 +618,6 @@ user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 	for(; begin < end; begin += PGSIZE){
 		page_lookup(env->env_pgdir, (void*)begin, &pageTable);
 		if(!pageTable || begin >= (uintptr_t)ULIM || (((*pageTable) & perm) ^ perm)){
-			env_destroy(env);
 			user_mem_check_addr = (begin < (uintptr_t)va ? (uintptr_t)va : begin);
 			return -E_FAULT;
 		}

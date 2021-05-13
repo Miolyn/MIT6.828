@@ -74,12 +74,14 @@ trap_init(void)
 		if(entryPointOfTraps[i][1] == T_BRKPT || entryPointOfTraps[i][1] == T_SYSCALL){
 			SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 3);
 		} 
+		else SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 0);
+
+
 		// 如果在用户程序中int 13想要触发缺页中断就将这个缺页的处理段设置为3用户态也能访问，但实际上这样是不科学的。
 		// 缺页只能由操作系统来进行处理，所以需要设置dpl为0，内核权限级。如果用户态想要触发缺页中断的话就会转变成int 13 General Protection
 		// else if(entryPointOfTraps[i][1] == T_PGFLT){
 		// 	SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 3);
 		// }
-		else SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 0);
 	}
 	/*
 	make_gate(T_DIVIDE, 0, 0);
@@ -180,11 +182,8 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
+	cprintf("tf trapno:%d\n", tf->tf_trapno);
 
-	if(tf->tf_trapno == T_BRKPT || tf->tf_trapno == T_DEBUG){
-		monitor(tf);
-		return;
-	}
 	switch (tf->tf_trapno)
 	{
 	case T_SYSCALL:
@@ -195,13 +194,14 @@ trap_dispatch(struct Trapframe *tf)
 		cprintf("\ninto T_PGFLT handler\n");
 		page_fault_handler(tf);
 		return;
-		break;
 	case T_BRKPT:
 		monitor(tf);
 		return;
 	case T_DEBUG:
-		break;
+		monitor(tf);
+		return;
 	default:
+		// env_destroy(curenv);
 		break;
 	}
 

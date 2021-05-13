@@ -11,6 +11,7 @@
         "memlayout.h": "c",
         "mmu.h": "c",
         "syscall.h": "c",
-        "pmap.h": "c"
+        "pmap.h": "c",
+        "lib.h": "c"
     }
 }

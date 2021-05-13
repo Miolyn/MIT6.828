@@ -357,11 +357,12 @@ load_icode(struct Env *e, uint8_t *binary)
 		panic("binary ELF file e_magic != ELF_MAGIC");
 	}
 	// 使用memcpy将二进制文件移到对应用户内存中，就要用用户的页目录，否则只有内核知道这个二进制文件在内存的位置了
-	lcr3(PADDR(e->env_pgdir));
 
 	struct Proghdr *ph, *eph;
 	ph = (struct Proghdr*)(binary + ElfHeader->e_phoff);
     eph = ph + ElfHeader->e_phnum;
+	lcr3(PADDR(e->env_pgdir));
+
 	for(; ph < eph; ph++){
 		if(ph->p_type == ELF_PROG_LOAD){
 			assert(ph->p_filesz <= ph->p_memsz);
@@ -370,14 +371,14 @@ load_icode(struct Env *e, uint8_t *binary)
 			memcpy((void*)ph->p_va, (void*)(binary + ph->p_offset), ph->p_filesz);
 		}
 	}
-
+	lcr3(PADDR(kern_pgdir));
+	e->env_tf.tf_eip = ElfHeader->e_entry;
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 
 	// LAB 3: Your code here.
 	region_alloc(e, (void*)(USTACKTOP - PGSIZE), PGSIZE);
-	lcr3(PADDR(kern_pgdir));
-	e->env_tf.tf_eip = ElfHeader->e_entry;
+
 }
 
 //
@@ -392,7 +393,7 @@ env_create(uint8_t *binary, enum EnvType type)
 {
 	// LAB 3: Your code here.
 	struct Env *e;
-	if(env_alloc(&e, 0) < 0){
+	if(env_alloc(&e, 0) != 0){
 		panic("env alloc error, in env create");
 	}
 	load_icode(e, binary);
@@ -513,7 +514,7 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 
 	// LAB 3: Your code here.
-	if(curenv != NULL && curenv->env_status == ENV_RUNNING){
+	if(curenv  && curenv->env_status == ENV_RUNNING){
 		curenv->env_status = ENV_RUNNABLE;
 	}
 	curenv = e;
@@ -521,6 +522,6 @@ env_run(struct Env *e)
 	++curenv->env_runs;
 	lcr3(PADDR(curenv->env_pgdir));
 	env_pop_tf(&curenv->env_tf);
-	panic("env_run not yet implemented");
+	// panic("env_run not yet implemented");
 }
 
