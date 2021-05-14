@@ -72,7 +72,7 @@ trap_init(void)
 	int i;
 	for(i = 0; i <= 20; ++i){
 		if(entryPointOfTraps[i][1] == T_BRKPT || entryPointOfTraps[i][1] == T_SYSCALL){
-			SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 3);
+			SETGATE(idt[entryPointOfTraps[i][1]], 1, GD_KT, entryPointOfTraps[i][0], 3);
 		} 
 		else SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 0);
 
@@ -187,8 +187,14 @@ trap_dispatch(struct Trapframe *tf)
 	switch (tf->tf_trapno)
 	{
 	case T_SYSCALL:
-		tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx, 
-				tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+		tf->tf_regs.reg_eax = syscall(
+			tf->tf_regs.reg_eax, 
+			tf->tf_regs.reg_edx, 
+			tf->tf_regs.reg_ecx, 
+			tf->tf_regs.reg_ebx, 
+			tf->tf_regs.reg_edi, 
+			tf->tf_regs.reg_esi
+		);
 		return;
 	case T_PGFLT:
 		cprintf("\ninto T_PGFLT handler\n");

@@ -167,6 +167,7 @@ env_setup_vm(struct Env *e)
 	struct PageInfo *p = NULL;
 
 	// Allocate a page for the page directory
+	// 准备为用户环境的env分配一页页目录
 	if (!(p = page_alloc(ALLOC_ZERO)))
 		return -E_NO_MEM;
 
@@ -187,11 +188,19 @@ env_setup_vm(struct Env *e)
 	//    - The functions in kern/pmap.h are handy.
 
 	// LAB 3: Your code here.
+	// 设置env的环境页目录表
 	e->env_pgdir = (pde_t *) page2kva(p);
+	// 为了让用户环境也能正常运行，所以需要将内核的页目录内容复制到用户的页目录中，
+	// 所以一开始用户环境和内核有相同的内存映射
 	memcpy(e->env_pgdir, kern_pgdir, PGSIZE);
 	p->pp_ref += 1;
 	// UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
+	// 随后就是设置用户页表了，这里相当于覆盖了内核时的用户页表，因为内核态的时候用户为内核，所以用户页表是内核的页表
+	// 现在的用户就是普通用户，所以用户页表相应的也设置为刚刚初始化的用户页目录表
+	// 在用户环境下，权限设置为内核只读不能写，用户也是只读。而内核对这部分内存则是可读写的。
+	// 即用户环境下不能修改用户页表，而内核对用户页目录表这部分的实内存是有PTE_W的
+	// 对应boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_W | PTE_P);
 	e->env_pgdir[PDX(UVPT)] = PADDR(e->env_pgdir) | PTE_P | PTE_U;
 
 	return 0;
@@ -216,6 +225,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 		return -E_NO_FREE_ENV;
 
 	// Allocate and set up the page directory for this environment.
+	// 为环境设置用户页表
 	if ((r = env_setup_vm(e)) < 0)
 		return r;
 
@@ -223,6 +233,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 	generation = (e->env_id + (1 << ENVGENSHIFT)) & ~(NENV - 1);
 	if (generation <= 0)	// Don't create a negative env_id.
 		generation = 1 << ENVGENSHIFT;
+	// env_id分为两个部分，低10个bit是env的index，然后接着21个bit是Uniqueifier类似于时间戳区分不同时间创建的env，最高位是0
 	e->env_id = generation | (e - envs);
 
 	// Set the basic status variables.
@@ -235,6 +246,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 	// to prevent the register values
 	// of a prior environment inhabiting this Env structure
 	// from "leaking" into our new environment.
+	// 清除所有寄存器的值避免之前的环境残留的值破坏当前的新环境
 	memset(&e->env_tf, 0, sizeof(e->env_tf));
 
 	// Set up appropriate initial values for the segment registers.
@@ -245,14 +257,19 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 	// we switch privilege levels, the hardware does various
 	// checks involving the RPL and the Descriptor Privilege Level
 	// (DPL) stored in the descriptors themselves.
+	// 为段寄存器设置权限和段选择符，设置GD_UD用户数据段，和GD_UT用户代码段，
+	// 以及USTACKTOP用户栈
+	// 段寄存器的低2为表示的是权限级，由于是用户环境所以设置为3用户模式，这样在做一些访问的时候，硬件就能做相关的权限判断了
 	e->env_tf.tf_ds = GD_UD | 3;
 	e->env_tf.tf_es = GD_UD | 3;
 	e->env_tf.tf_ss = GD_UD | 3;
 	e->env_tf.tf_esp = USTACKTOP;
 	e->env_tf.tf_cs = GD_UT | 3;
 	// You will set e->env_tf.tf_eip later.
+	// 等到加载用户程序的时候就需要设置tf_eip来设置程序入口
 
 	// commit the allocation
+	// 完成新环境的分配
 	env_free_list = e->env_link;
 	*newenv_store = e;
 
@@ -277,6 +294,7 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
+	// 小坑，如果va_end放在va后面就会出错，用的是va进行来align之后的值就会出现错误
 	void* va_end = ROUNDUP(va + len, PGSIZE);
 	va = ROUNDDOWN(va, PGSIZE);
 	if(va > va_end){
@@ -286,10 +304,12 @@ region_alloc(struct Env *e, void *va, size_t len)
 	size_t i;
 	struct PageInfo* pageInfo;
 	for(i = 0; i < numOfPageTable; i++){
+		// 分配一页内存
 		pageInfo = page_alloc(ALLOC_ZERO);
 		if(!pageInfo) {
 			panic("no free memmory in region alloc");
 		}
+		// 将这页内存与用户页表对应va的虚拟地址建立联系，且权限是用户和内核都可以读写的
 		if(page_insert(e->env_pgdir, pageInfo, va, (PTE_U | PTE_W | PTE_P))){
 			panic("alloc page fail in region alloc");
 		}
@@ -352,31 +372,44 @@ load_icode(struct Env *e, uint8_t *binary)
 	//  What?  (See env_run() and env_pop_tf() below.)
 
 	// LAB 3: Your code here.
+	// 将binary指针头转换成ELF结构体类型，因为这段用户程序就是ELF文件
 	struct Elf* ElfHeader = (struct Elf *)binary;
+	// 检查ELF文件的magic字段是否符合
 	if(ElfHeader->e_magic != ELF_MAGIC){
 		panic("binary ELF file e_magic != ELF_MAGIC");
 	}
 	// 使用memcpy将二进制文件移到对应用户内存中，就要用用户的页目录，否则只有内核知道这个二进制文件在内存的位置了
 
 	struct Proghdr *ph, *eph;
+	// 设置ph指针指向ELF文件中的程序头标项
 	ph = (struct Proghdr*)(binary + ElfHeader->e_phoff);
+	// ELF文件的程序头标项的个数
     eph = ph + ElfHeader->e_phnum;
+	//从内核页表切换至用户页表进行程序加载，因为程序是要加载到用户空间的，页表的映射关系也是存在用户页表上
 	lcr3(PADDR(e->env_pgdir));
 
 	for(; ph < eph; ph++){
 		if(ph->p_type == ELF_PROG_LOAD){
 			assert(ph->p_filesz <= ph->p_memsz);
+			// 在程序段对应虚拟地址位置分配相应内存大小的物理内存
 			region_alloc(e, (void *)ph->p_va, (size_t)ph->p_memsz);
+			// 将这段内存清空
+			// 现在就能体现出为什么要切换成用户页表了，此时CPU寻址都是依照用户页表进行寻址，程序加载将会加载到用户空间处。
+			// 所以因为内核的页表没有相应的region_alloc，所以用户程序对于内核来说是不可见的，没有内存映射关系
 			memset((void*)ph->p_va, 0, ph->p_memsz);
+			// 将程序加载到对应虚拟地址位置
 			memcpy((void*)ph->p_va, (void*)(binary + ph->p_offset), ph->p_filesz);
 		}
 	}
+	// 切换会内核的页表
 	lcr3(PADDR(kern_pgdir));
+	// 设置用户环境的程序入口地址
 	e->env_tf.tf_eip = ElfHeader->e_entry;
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 
 	// LAB 3: Your code here.
+	// 为用户程序分配一页大小的内存作为用户栈，也是映射在用户页表上的，对于内核来说这段用户栈不可见
 	region_alloc(e, (void*)(USTACKTOP - PGSIZE), PGSIZE);
 
 }
@@ -393,9 +426,11 @@ env_create(uint8_t *binary, enum EnvType type)
 {
 	// LAB 3: Your code here.
 	struct Env *e;
+	// 创建用户环境，进行相应寄存器和用户页表初始化
 	if(env_alloc(&e, 0) != 0){
 		panic("env alloc error, in env create");
 	}
+	// 将用户程序加载到用户空间去
 	load_icode(e, binary);
 	e->env_type = type;
 	e->env_parent_id = 0;
@@ -414,6 +449,7 @@ env_free(struct Env *e)
 	// If freeing the current environment, switch to kern_pgdir
 	// before freeing the page directory, just in case the page
 	// gets reused.
+	// 若要释放的环境是当前环境，则切换至内核页表
 	if (e == curenv)
 		lcr3(PADDR(kern_pgdir));
 
@@ -422,33 +458,41 @@ env_free(struct Env *e)
 
 	// Flush all mapped pages in the user portion of the address space
 	static_assert(UTOP % PTSIZE == 0);
+	// 遍历从0到UTOP的页目录
 	for (pdeno = 0; pdeno < PDX(UTOP); pdeno++) {
 
 		// only look at mapped page tables
+		// 只检查存在的页目录
 		if (!(e->env_pgdir[pdeno] & PTE_P))
 			continue;
 
 		// find the pa and va of the page table
+		// 获取对应页目录的页表table
 		pa = PTE_ADDR(e->env_pgdir[pdeno]);
 		pt = (pte_t*) KADDR(pa);
 
 		// unmap all PTEs in this page table
+		// 遍历整个页表table，释放存在的页
 		for (pteno = 0; pteno <= PTX(~0); pteno++) {
 			if (pt[pteno] & PTE_P)
+			// page_remove包括了page_decref
 				page_remove(e->env_pgdir, PGADDR(pdeno, pteno, 0));
 		}
 
 		// free the page table itself
+		// 释放对应页目录项
 		e->env_pgdir[pdeno] = 0;
 		page_decref(pa2page(pa));
 	}
 
 	// free the page directory
+	// 释放整个页目录
 	pa = PADDR(e->env_pgdir);
 	e->env_pgdir = 0;
 	page_decref(pa2page(pa));
 
 	// return the environment to the free list
+	// 将环境放回空闲环境链表中
 	e->env_status = ENV_FREE;
 	e->env_link = env_free_list;
 	env_free_list = e;
@@ -477,6 +521,8 @@ env_destroy(struct Env *e)
 void
 env_pop_tf(struct Trapframe *tf)
 {
+	// 根据TrapFrame进行弹栈，将Trapframe中对应的寄存器之类的值放入对应寄存器中
+	// 然后使用iret来进行环境切换
 	__asm __volatile("movl %0,%%esp\n"
 		"\tpopal\n"
 		"\tpopl %%es\n"
@@ -520,7 +566,9 @@ env_run(struct Env *e)
 	curenv = e;
 	curenv->env_status = ENV_RUNNING;
 	++curenv->env_runs;
+	// 切换为用户环境页表
 	lcr3(PADDR(curenv->env_pgdir));
+	// 进入用户环境
 	env_pop_tf(&curenv->env_tf);
 	// panic("env_run not yet implemented");
 }
