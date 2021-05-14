@@ -20,15 +20,15 @@ syscall(int num, int check, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 	// potentially change the condition codes and arbitrary
 	// memory locations.
 
-	asm volatile("int %1\n"
-		: "=a" (ret)
-		: "i" (T_SYSCALL),
-		  "a" (num),
-		  "d" (a1),
-		  "c" (a2),
-		  "b" (a3),
-		  "D" (a4),
-		  "S" (a5)
+	asm volatile("int %1\n"		// 这里指向num
+		: "=a" (ret)			// 返回值从eax 设置到 ret里面。
+		: "i" (T_SYSCALL),		// 这里随意选择一个寄存器
+		  "a" (num),			// 把想要调用的中断号给eax
+		  "d" (a1),				// 第一个参数给edx
+		  "c" (a2),				// 第二个参数给ecx
+		  "b" (a3),				// 第三个参数给ebx
+		  "D" (a4),				// 第四个参数给edi
+		  "S" (a5)				// 第五个参数给esi
 		: "cc", "memory");
 
 	if(check && ret > 0)

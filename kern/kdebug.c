@@ -113,6 +113,8 @@ stab_binsearch(const struct Stab *stabs, int *region_left, int *region_right,
 int
 debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
 {
+	// stab 节在 ELF 文件结构为符号表部分
+	// n_type 有几种类型，SO 表示主函数的文件名，SOL 表示包含进的文件名，SLINE 表示代码段的行号，FUN 表示函数的名称
 	const struct Stab *stabs, *stab_end;
 	const char *stabstr, *stabstr_end;
 	int lfile, rfile, lfun, rfun, lline, rline;
@@ -138,7 +140,9 @@ debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
 		// __STABSTR_END__) in a structure located at virtual address
 		// USTABDATA.
 		const struct UserStabData *usd = (const struct UserStabData *) USTABDATA;
-
+		if(user_mem_check(curenv, usd, sizeof(struct UserStabData), PTE_U | PTE_P)){
+			return -1;
+		}
 		// Make sure this memory is valid.
 		// Return -1 if it is not.  Hint: Call user_mem_check.
 		// LAB 3: Your code here.
@@ -150,6 +154,11 @@ debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
 
 		// Make sure the STABS and string table memory is valid.
 		// LAB 3: Your code here.
+		if(user_mem_check(curenv, stabs, stab_end - stabs, PTE_U | PTE_P)
+			|| user_mem_check(curenv, stabstr, stabstr_end - stabstr, PTE_U | PTE_P)){
+			return -1;
+		}
+
 	}
 
 	// String table validity checks
@@ -204,7 +213,10 @@ debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
 	//	Look at the STABS documentation and <inc/stab.h> to find
 	//	which one.
 	// Your code here.
-
+	stab_binsearch(stabs, &lline, &rline, N_SLINE, addr);
+	if(lline > rline)
+		return -1;
+	info->eip_line = stabs[rline].n_desc;
 
 	// Search backwards from the line number for the relevant filename
 	// stab.
