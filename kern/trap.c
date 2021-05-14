@@ -76,7 +76,6 @@ trap_init(void)
 		} 
 		else SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 0);
 
-
 		// 如果在用户程序中int 13想要触发缺页中断就将这个缺页的处理段设置为3用户态也能访问，但实际上这样是不科学的。
 		// 缺页只能由操作系统来进行处理，所以需要设置dpl为0，内核权限级。如果用户态想要触发缺页中断的话就会转变成int 13 General Protection
 		// else if(entryPointOfTraps[i][1] == T_PGFLT){
