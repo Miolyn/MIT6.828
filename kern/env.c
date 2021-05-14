@@ -277,8 +277,8 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
-	va = ROUNDDOWN(va, PGSIZE);
 	void* va_end = ROUNDUP(va + len, PGSIZE);
+	va = ROUNDDOWN(va, PGSIZE);
 	if(va > va_end){
 		panic("the va_end is too large exceed memmory");
 	}
@@ -366,7 +366,7 @@ load_icode(struct Env *e, uint8_t *binary)
 	for(; ph < eph; ph++){
 		if(ph->p_type == ELF_PROG_LOAD){
 			assert(ph->p_filesz <= ph->p_memsz);
-			region_alloc(e,(void *)ph->p_va, (size_t)ph->p_memsz);
+			region_alloc(e, (void *)ph->p_va, (size_t)ph->p_memsz);
 			memset((void*)ph->p_va, 0, ph->p_memsz);
 			memcpy((void*)ph->p_va, (void*)(binary + ph->p_offset), ph->p_filesz);
 		}

@@ -21,7 +21,6 @@ sys_cputs(const char *s, size_t len)
 	// Destroy the environment if not.
 
 	// LAB 3: Your code here.
-	cprintf("into cputs\n\n");
 	user_mem_assert(curenv, s, len, PTE_U | PTE_P);
 	// Print the string supplied by the user.
 	cprintf("%.*s", len, s);
