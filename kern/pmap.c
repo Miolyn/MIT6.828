@@ -239,12 +239,12 @@ mem_init(void)
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
 
-	// Initialize the SMP-related parts of the memory map
-	mem_init_mp();
-
 	// 2^32 - KERNBASE = ~KERNBASE + 1 + 2^32 = -KERNBASE
 	// 将KERNBASE开始往后的内存都映射到低地址处，[KERNBASE, 2^32)->[0,2^32)
 	boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_W | PTE_P);
+
+	// Initialize the SMP-related parts of the memory map
+	mem_init_mp();
 	// Check that the initial page directory has been set up correctly.
 	check_kern_pgdir();
 
@@ -294,7 +294,11 @@ mem_init_mp(void)
 	//     Permissions: kernel RW, user NONE
 	//
 	// LAB 4: Your code here:
-
+	int i;
+	for(i = 0; i < NCPU; i++){
+		uintptr_t va = KSTACKTOP - KSTKSIZE - i * (KSTKSIZE + KSTKGAP);
+		boot_map_region(kern_pgdir, va, KSTKSIZE, PADDR(percpu_kstacks[i]), PTE_W | PTE_P);
+	}
 }
 
 // --------------------------------------------------------------
@@ -337,6 +341,7 @@ page_init(void)
 	size_t i;
 	physaddr_t bootAllocBaseAddr = (physaddr_t)boot_alloc(0);
 	size_t bootAllocPageNum = PGNUM(PADDR((void*)bootAllocBaseAddr));
+	size_t mpEntryPageNum = PGNUM(MPENTRY_PADDR);
 	// cprintf("boot alloc page num is: %d, boot alloc base addr is: %x\n", bootAllocPageNum, bootAllocBaseAddr);
 	// cprintf("PGNUM(IOPHYSMEM): %d, PGNUM(EXTPHYSMEM):%d\n", PGNUM(IOPHYSMEM), PGNUM(EXTPHYSMEM));
 	for (i = 0; i < npages; i++) {
@@ -346,7 +351,7 @@ page_init(void)
 		// 从EXTPHYSMEM0x100000开始的部分内容是存储内核启动程序和数据的，
 		// 然后从bss段开始到bootAllocBaseAddr这段内存用来存放页目录和PageInfo了，也不能分配
 		// 其余内存都可以分配
-		if(i == 0 || (i >= PGNUM(IOPHYSMEM) && i < bootAllocPageNum)){
+		if(i == 0 || (i >= PGNUM(IOPHYSMEM) && i < bootAllocPageNum) || i == mpEntryPageNum){
 			pages[i].pp_ref = 1;
 			pages[i].pp_link = NULL;
 		} else{
@@ -655,7 +660,17 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-	panic("mmio_map_region not implemented");
+	physaddr_t pa_end = ROUNDUP(pa + size, PGSIZE);
+	physaddr_t pa_begin = ROUNDDOWN(pa, PGSIZE);
+	if(base + pa_end - pa_begin >= MMIOLIM){
+		panic("mmio memmory alloc error");
+	}
+	size = pa_end - pa_begin;
+	boot_map_region(kern_pgdir, base, size, pa_begin, (PTE_PCD | PTE_PWT | PTE_W | PTE_P));
+	base += size;
+	// panic("mmio_map_region not implemented");
+	//  Return the base of the reserved region
+	return (void *)(base - size);
 }
 
 static uintptr_t user_mem_check_addr;

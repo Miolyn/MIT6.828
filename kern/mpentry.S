@@ -28,6 +28,7 @@
 #      symbols, rather than relying on the linker to fill them
 
 #define RELOC(x) ((x) - KERNBASE)
+// s - mpentry_start 相当于s相对于启动程序mpentry_start的位置，然后再加上物理地址MPENTRY_PADDR就是在ap CPU上的真实物理地址
 #define MPBOOTPHYS(s) ((s) - mpentry_start + MPENTRY_PADDR)
 
 .set PROT_MODE_CSEG, 0x8	# kernel code segment selector
@@ -42,7 +43,7 @@ mpentry_start:
 	movw    %ax, %ds
 	movw    %ax, %es
 	movw    %ax, %ss
-
+// boot loader的VMA 和 LMA 都是0x7c00, 因此生成的重定位的symbol都是低地址（物理地址），可以直接用。然而，mpentry.S中的代码片段原来属于内核，也就是说VMA是0xf000000，所以里面的symbol地址都是高地址，需要转换后使用。
 	lgdt    MPBOOTPHYS(gdtdesc)
 	movl    %cr0, %eax
 	orl     $CR0_PE, %eax

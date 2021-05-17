@@ -50,19 +50,31 @@ i386_init(void)
 
 	// Acquire the big kernel lock before waking up APs
 	// Your code here:
+	lock_kernel();
 
 	// Starting non-boot CPUs
+	// 驱动 AP 的引导过程
 	boot_aps();
-
+	cprintf("boot aps success\n");
 #if defined(TEST)
 	// Don't touch -- used by grading script!
 	ENV_CREATE(TEST, ENV_TYPE_USER);
 #else
 	// Touch all you want.
-	ENV_CREATE(user_primes, ENV_TYPE_USER);
+	cprintf("generate 2 yield\n");
+	
+	// ENV_CREATE(user_yield, ENV_TYPE_USER);
+	// ENV_CREATE(user_yield, ENV_TYPE_USER);
+	// ENV_CREATE(user_yield, ENV_TYPE_USER);
+	// ENV_CREATE(user_yield, ENV_TYPE_USER);
+	
+	ENV_CREATE(user_dumbfork, ENV_TYPE_USER);
+	ENV_CREATE(user_dumbfork, ENV_TYPE_USER);
+	// ENV_CREATE(user_dumbfork, ENV_TYPE_USER);
+	// ENV_CREATE(user_dumbfork, ENV_TYPE_USER);
 #endif // TEST*
-
 	// Schedule and run the first user environment!
+	cprintf("BPS already into sched_yield\n");
 	sched_yield();
 }
 
@@ -71,7 +83,12 @@ i386_init(void)
 // this variable.
 void *mpentry_kstack;
 
+// APs在实模式下启动，与boot/boot.S的引导过程相似：boot_aps()将AP入口代码（kern/mpentry.S）拷贝到实模式下的一个可寻址的内存位置。
+// 与boot/boot.S的引导过程不同的是，jos会控制AP将会在哪里开始执行代码；jos将入口代码拷贝到0x7000（MPENTRY_PADDR），但640KB以下的任何unused、page-aligned的物理地址都被使用。
 // Start the non-boot (AP) processors.
+// 此后，boot_aps()逐一激活APs，通过给匹配AP的LAPIC发送STARTUP IPIs以及一个初始CS:IP地址，AP将在该地址上（即MPENTRY_PADDR）执行入口代码。
+// kern/mpentry.S在简单设置之后将AP运行模式设为保护模式，开启分页，然后调用c函数mp_main()（also in kern/init.c）。
+// boot_aps()等待AP发送CPU_STARTED信号（见struct CpuInfo的cpu_status域），然后激活下一个AP。
 static void
 boot_aps(void)
 {
@@ -80,7 +97,9 @@ boot_aps(void)
 	struct CpuInfo *c;
 
 	// Write entry code to unused memory at MPENTRY_PADDR
+	// AP 们在实模式中开始，因此，boot_aps() 将 AP 入口代码（kern/mpentry.S）复制到实模式中的那个可寻址内存地址上。
 	code = KADDR(MPENTRY_PADDR);
+	// 将AP入口代码（kern/mpentry.S）拷贝到实模式下的一个可寻址的内存位置。
 	memmove(code, mpentry_start, mpentry_end - mpentry_start);
 
 	// Boot each AP one at a time
@@ -89,15 +108,17 @@ boot_aps(void)
 			continue;
 
 		// Tell mpentry.S what stack to use 
+		// 每个CPU的内核栈
 		mpentry_kstack = percpu_kstacks[c - cpus] + KSTKSIZE;
 		// Start the CPU at mpentry_start
 		lapic_startap(c->cpu_id, PADDR(code));
 		// Wait for the CPU to finish some basic setup in mp_main()
+		// boot_aps()等待AP发送CPU_STARTED信号（见struct CpuInfo的cpu_status域），然后激活下一个AP。
 		while(c->cpu_status != CPU_STARTED)
 			;
 	}
 	// We only have one user environment for now, so just run it.
-	env_run(&envs[0]);
+	// env_run(&envs[0]);
 }
 
 // Setup code for APs
@@ -118,9 +139,10 @@ mp_main(void)
 	// only one CPU can enter the scheduler at a time!
 	//
 	// Your code here:
-
+	lock_kernel();
+	sched_yield();
 	// Remove this after you finish Exercise 4
-	for (;;);
+	// for (;;);
 }
 
 /*

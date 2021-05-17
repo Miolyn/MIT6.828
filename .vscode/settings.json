@@ -12,6 +12,8 @@
         "mmu.h": "c",
         "syscall.h": "c",
         "pmap.h": "c",
-        "lib.h": "c"
+        "lib.h": "c",
+        "types.h": "c",
+        "spinlock.h": "c"
     }
 }

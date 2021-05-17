@@ -132,6 +132,7 @@ env_init(void)
 	env_init_percpu();
 }
 
+// 调用env_init_percpu()函数加载当前cpu的GDT和gs/fs/es/ds/ss段描述符。
 // Load GDT and segment descriptors.
 void
 env_init_percpu(void)
@@ -205,7 +206,7 @@ env_setup_vm(struct Env *e)
 	// 即用户环境下不能修改用户页表，而内核对用户页目录表这部分的实内存是有PTE_W的
 	// 对应boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_W | PTE_P);
 	e->env_pgdir[PDX(UVPT)] = PADDR(e->env_pgdir) | PTE_P | PTE_U;
-
+	cprintf("e->env_pgdir:%x\n", e->env_pgdir);
 	return 0;
 }
 
@@ -546,7 +547,7 @@ env_pop_tf(struct Trapframe *tf)
 {
 	// Record the CPU we are running on for user-space debugging
 	curenv->env_cpunum = cpunum();
-
+	cprintf("env run on cpu:%d\n", curenv->env_cpunum);
 	// 根据TrapFrame进行弹栈，将Trapframe中对应的寄存器之类的值放入对应寄存器中
 	// 然后使用iret来进行环境切换
 	__asm __volatile("movl %0,%%esp\n"
@@ -594,6 +595,7 @@ env_run(struct Env *e)
 	++curenv->env_runs;
 	// 切换为用户环境页表
 	lcr3(PADDR(curenv->env_pgdir));
+	unlock_kernel();
 	// 进入用户环境
 	env_pop_tf(&curenv->env_tf);
 	// panic("env_run not yet implemented");

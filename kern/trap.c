@@ -93,7 +93,7 @@ trap_init(void)
 	make_gate(T_DIVIDE, 0, 0);
 	make_gate(T_DEBUG, 0, 0);
 	make_gate(T_NMI, 0, 0);
-	make_gate(T_BRKPT, 0, 0);
+	make_gate(T_BRKPT, 1, 3);
 	make_gate(T_OFLOW, 0, 0);
 	make_gate(T_BOUND, 0, 0);
 	make_gate(T_ILLOP, 0, 0);
@@ -133,7 +133,8 @@ trap_init_percpu(void)
 	//     rather than the global "ts" variable;
 	//   - Use gdt[(GD_TSS0 >> 3) + i] for CPU i's TSS descriptor;
 	//   - You mapped the per-CPU kernel stacks in mem_init_mp()
-	//
+	//   - Initialize cpu_ts.ts_iomb to prevent unauthorized environments
+	//     from doing IO (0 is not the correct value!)
 	// ltr sets a 'busy' flag in the TSS selector, so if you
 	// accidentally load the same TSS on more than one CPU, you'll
 	// get a triple fault.  If you set up an individual CPU's TSS
@@ -141,21 +142,30 @@ trap_init_percpu(void)
 	// user space on that CPU.
 	//
 	// LAB 4: Your code here:
-
+	
+	thiscpu->cpu_ts.ts_esp0 = KSTACKTOP - thiscpu->cpu_id * (KSTKSIZE + KSTKGAP);
+	// thiscpu->cpu_ts.ts_esp0 = (uintptr_t)percpu_kstacks[thiscpu->cpu_id];
+	thiscpu->cpu_ts.ts_ss0 = GD_KD;
+	thiscpu->cpu_ts.ts_iomb = sizeof(struct Taskstate);
 	// Setup a TSS so that we get the right stack
 	// when we trap to the kernel.
-	ts.ts_esp0 = KSTACKTOP;
-	ts.ts_ss0 = GD_KD;
+	// ts.ts_esp0 = KSTACKTOP;
+	// ts.ts_ss0 = GD_KD;
 
+	// GD_TSS0   0x28     // Task segment selector for CPU 0
 	// Initialize the TSS slot of the gdt.
-	gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
+	// 段选择符分为3部分，从左到右第一部分是13bit的index，第二部分是1bit的TI表示描述符在LDT中，然后是2bit的RPL优先级
+	// 所以GD_TSS0的index就要先右移3bit
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts),
 					sizeof(struct Taskstate), 0);
-	gdt[GD_TSS0 >> 3].sd_s = 0;
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id].sd_s = 0;
 
+	// 可以通过 ltr指令跟上TSS段描述符的选择子来加载TSS段。该指令是特权指令，只能在特权级为0的情况下使用。
 	// Load the TSS selector (like other segment selectors, the
 	// bottom three bits are special; we leave them 0)
-	ltr(GD_TSS0);
-
+	// 为了装载正确的gdt就要加上这个CPU对应的index，所以要加到段选择符的index段上，因此cpu_id要右移3bit
+	ltr(GD_TSS0 + (thiscpu->cpu_id << 3));
+	
 	// Load the IDT
 	lidt(&idt_pd);
 }
@@ -211,7 +221,7 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
-	cprintf("tf trapno:%d\n", tf->tf_trapno);
+	cprintf("tf trapno:%d,trapname:%s\n", tf->tf_trapno, trapname(tf->tf_trapno));
 
 	switch (tf->tf_trapno)
 	{
@@ -289,6 +299,7 @@ trap(struct Trapframe *tf)
 		// Acquire the big kernel lock before doing any
 		// serious kernel work.
 		// LAB 4: Your code here.
+		lock_kernel();
 		assert(curenv);
 
 		// Garbage collect if current enviroment is a zombie
