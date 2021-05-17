@@ -341,6 +341,7 @@ page_fault_handler(struct Trapframe *tf)
 
 	// Read processor's CR2 register to find the faulting address
 	fault_va = rcr2();
+	// LAB 3: Your code here.
 
 	// Handle kernel-mode page faults.
 	// 虽然user/softint是通过int指令，想要触发page fault，
@@ -350,7 +351,6 @@ page_fault_handler(struct Trapframe *tf)
 	if((tf->tf_cs & 3) == 0){
 		panic(":( Your kernel triger a page fault at va@0x%08x !Bad kernel", fault_va);
 	}
-	// LAB 3: Your code here.
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
@@ -382,8 +382,52 @@ page_fault_handler(struct Trapframe *tf)
 	//   user_mem_assert() and env_run() are useful here.
 	//   To change what the user environment runs, modify 'curenv->env_tf'
 	//   (the 'tf' variable points at 'curenv->env_tf').
-
+	
 	// LAB 4: Your code here.
+	if(curenv->env_pgfault_upcall){
+		uintptr_t stack_top;
+		if(curenv->env_tf.tf_esp >= UXSTACKTOP - PGSIZE && curenv->env_tf.tf_esp <= UXSTACKTOP - 1){
+			// the user environment is already running on the exception stack when an exception occurs.
+			// Thus,we should start the new stack frame just under the tf->tf_esp.We have to push a word
+			// at the top of the trap-time stack as a scratch space.
+			user_mem_assert(curenv, (void*)(curenv->env_tf.tf_esp - 4), 4, PTE_U | PTE_W);
+			stack_top = curenv->env_tf.tf_esp - 4;
+		} else{
+			stack_top = UXSTACKTOP;
+		}
+		stack_top -= sizeof(struct UTrapframe);
+		user_mem_assert(curenv, (void*)stack_top, sizeof(struct UTrapframe), PTE_U | PTE_W);
+		struct UTrapframe *utf = (struct UTrapframe*)stack_top;
+		/*
+<-- UXSTACKTOP
+    trap-time esp
+    trap-time eflags
+    trap-time eip
+    trap-time eax     start of struct PushRegs
+    trap-time ecx
+    trap-time edx
+    trap-time ebx
+    trap-time esp
+    trap-time ebp
+    trap-time esi
+    trap-time edi      end of struct PushRegs
+    tf_err (error code)
+    fault_va           <-- %esp when handler is run
+		*/
+		// faulting address
+		utf->utf_fault_va = fault_va;
+		utf->utf_err = tf->tf_err;
+		utf->utf_regs = tf->tf_regs;
+		// 页错误处理程序入口
+		utf->utf_eip = tf->tf_eip;
+		utf->utf_eflags = tf->tf_eflags;
+		utf->utf_esp = tf->tf_esp;
+
+		tf->tf_eip = (uintptr_t)curenv->env_pgfault_upcall;
+		tf->tf_esp = stack_top;
+		env_run(curenv);
+	}
+	
 
 	// Destroy the environment that caused the fault.
 	cprintf("[%08x] user fault va %08x ip %08x\n",
