@@ -55,13 +55,11 @@ i386_init(void)
 	// Starting non-boot CPUs
 	// 驱动 AP 的引导过程
 	boot_aps();
-	cprintf("boot aps success\n");
 #if defined(TEST)
 	// Don't touch -- used by grading script!
 	ENV_CREATE(TEST, ENV_TYPE_USER);
 #else
 	// Touch all you want.
-	cprintf("generate 2 yield\n");
 	
 	// ENV_CREATE(user_yield, ENV_TYPE_USER);
 	// ENV_CREATE(user_yield, ENV_TYPE_USER);
@@ -74,7 +72,6 @@ i386_init(void)
 	// ENV_CREATE(user_dumbfork, ENV_TYPE_USER);
 #endif // TEST*
 	// Schedule and run the first user environment!
-	cprintf("BPS already into sched_yield\n");
 	sched_yield();
 }
 

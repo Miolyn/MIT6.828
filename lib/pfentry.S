@@ -80,9 +80,9 @@ _pgfault_upcall:
     tf_err (error code)
     fault_va           <-- %esp when handler is run
 	*/
-	movl 0x28(%esp), %eax 			// utf.eip放到eax里
-	subl $4, 0x30(%esp)     		// utf.esp -= 4
-	movl 0x30(%esp), %edx  			// 将减4之后的utf.esp放入edx中
+	movl 40(%esp), %eax 			// utf.eip放到eax里
+	subl $4, 48(%esp)     			// utf.esp -= 4
+	movl 48(%esp), %edx  			// 将减4之后的utf.esp放入edx中
 	movl %eax, (%edx) 				// 将utf.eip返回地址放到(utf.esp)中
 	addl $8, %esp					// 将当前esp设置到指向utf.edi
 	// Restore the trap-time registers.  After you do this, you

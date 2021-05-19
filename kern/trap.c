@@ -77,9 +77,13 @@ trap_init(void)
 	// LAB 3: Your code here.
 	extern long entryPointOfTraps[][2];
 	int i;
-	for(i = 0; i <= 20; ++i){
-		if(entryPointOfTraps[i][1] == T_BRKPT || entryPointOfTraps[i][1] == T_SYSCALL){
-			SETGATE(idt[entryPointOfTraps[i][1]], 1, GD_KT, entryPointOfTraps[i][0], 3);
+	for(i = 0; i <= 26; ++i){
+		// if(entryPointOfTraps[i][1] == T_BRKPT || entryPointOfTraps[i][1] == T_SYSCALL){
+		if(entryPointOfTraps[i][1] == T_SYSCALL){
+			// istrap必须得设置为0，0 for an interrupt gate. istrap代表的是中断还是陷阱主要影响efalgs的IF位
+			// 如果是0即interrupt gate在穿过interrupt gate的时候会重置IF，即关中断，避免其他中断的影响
+			// 而trap类型在穿过trap gate的时候不会改变IF位，就不会关中断，所以如果IF位不重置，在trap的时候就会被assert拦截了
+			SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 3);
 		} 
 		else SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 0);
 
@@ -156,8 +160,9 @@ trap_init_percpu(void)
 	// Initialize the TSS slot of the gdt.
 	// 段选择符分为3部分，从左到右第一部分是13bit的index，第二部分是1bit的TI表示描述符在LDT中，然后是2bit的RPL优先级
 	// 所以GD_TSS0的index就要先右移3bit
+	// 将TSS limit设置为sizeof(struct Taskstate) - 1 CPU就会忽略ts_iomb了
 	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts),
-					sizeof(struct Taskstate), 0);
+					sizeof(struct Taskstate) - 1, 0);
 	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id].sd_s = 0;
 
 	// 可以通过 ltr指令跟上TSS段描述符的选择子来加载TSS段。该指令是特权指令，只能在特权级为0的情况下使用。
@@ -221,7 +226,7 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
-	cprintf("tf trapno:%d,trapname:%s\n", tf->tf_trapno, trapname(tf->tf_trapno));
+	// cprintf("tf trapno:%d,trapname:%s\n", tf->tf_trapno, trapname(tf->tf_trapno));
 
 	switch (tf->tf_trapno)
 	{
@@ -236,7 +241,6 @@ trap_dispatch(struct Trapframe *tf)
 		);
 		return;
 	case T_PGFLT:
-		cprintf("\ninto T_PGFLT handler\n");
 		page_fault_handler(tf);
 		return;
 	case T_BRKPT:
@@ -244,6 +248,10 @@ trap_dispatch(struct Trapframe *tf)
 		return;
 	case T_DEBUG:
 		monitor(tf);
+		return;
+	case IRQ_OFFSET + IRQ_TIMER:
+		lapic_eoi();
+		sched_yield();
 		return;
 	default:
 		// env_destroy(curenv);
@@ -276,6 +284,7 @@ trap_dispatch(struct Trapframe *tf)
 void
 trap(struct Trapframe *tf)
 {
+	// cprintf("tf trapno:%d,trapname:%s\n", tf->tf_trapno, trapname(tf->tf_trapno));
 	// The environment may have set DF and some versions
 	// of GCC rely on DF being clear
 	asm volatile("cld" ::: "cc");

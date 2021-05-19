@@ -206,7 +206,7 @@ env_setup_vm(struct Env *e)
 	// 即用户环境下不能修改用户页表，而内核对用户页目录表这部分的实内存是有PTE_W的
 	// 对应boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_W | PTE_P);
 	e->env_pgdir[PDX(UVPT)] = PADDR(e->env_pgdir) | PTE_P | PTE_U;
-	cprintf("e->env_pgdir:%x\n", e->env_pgdir);
+	// cprintf("e->env_pgdir:%x\n", e->env_pgdir);
 	return 0;
 }
 
@@ -274,7 +274,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 
 	// Enable interrupts while in user mode.
 	// LAB 4: Your code here.
-
+	e->env_tf.tf_eflags |= FL_IF;
 	// Clear the page fault handler until user installs one.
 	e->env_pgfault_upcall = 0;
 
@@ -547,7 +547,7 @@ env_pop_tf(struct Trapframe *tf)
 {
 	// Record the CPU we are running on for user-space debugging
 	curenv->env_cpunum = cpunum();
-	cprintf("env run on cpu:%d\n", curenv->env_cpunum);
+	// cprintf("env run on cpu:%d\n", curenv->env_cpunum);
 	// 根据TrapFrame进行弹栈，将Trapframe中对应的寄存器之类的值放入对应寄存器中
 	// 然后使用iret来进行环境切换
 	__asm __volatile("movl %0,%%esp\n"
