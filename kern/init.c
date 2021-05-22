@@ -42,7 +42,9 @@ i386_init(void)
 	trap_init();
 
 	// Lab 4 multiprocessor initialization functions
+	// 收集多处理的信息
 	mp_init();
+	// 初始化自己lapic  这个时候其他CPU还没有启动，此时还是BSP
 	lapic_init();
 
 	// Lab 4 multitasking initialization functions
@@ -105,12 +107,14 @@ boot_aps(void)
 			continue;
 
 		// Tell mpentry.S what stack to use 
-		// 每个CPU的内核栈
+		// 每个CPU的内核栈，在mpentry.S中将会movl    mpentry_kstack, %esp
+		// 启动ap处理器的时候设置他们各自的内核栈
 		mpentry_kstack = percpu_kstacks[c - cpus] + KSTKSIZE;
 		// Start the CPU at mpentry_start
+		// 发送STARTUP处理器中断IPI让ap使用code代码启动处理器并做初始化
 		lapic_startap(c->cpu_id, PADDR(code));
 		// Wait for the CPU to finish some basic setup in mp_main()
-		// boot_aps()等待AP发送CPU_STARTED信号（见struct CpuInfo的cpu_status域），然后激活下一个AP。
+		// boot_aps()等待AP执行完code启动完成后设置好cpu状态，然后激活下一个AP。
 		while(c->cpu_status != CPU_STARTED)
 			;
 	}
@@ -123,11 +127,14 @@ void
 mp_main(void)
 {
 	// We are in high EIP now, safe to switch to kern_pgdir 
+	// 设置内核页表
 	lcr3(PADDR(kern_pgdir));
 	cprintf("SMP: CPU %d starting\n", cpunum());
-
+	// 初始化ap处理器的lapic
 	lapic_init();
+	// 初始化处理器的env，包括设置ES, DS, and SS段寄存器的段选择符，设置为内核段的data和text段
 	env_init_percpu();
+	// 初始化ap处理器的trap，包括设置tss描述符(填写内核的栈地址，内核data段选择符，以及设置tss描述到GDT中然后加载TSS段寄存器)
 	trap_init_percpu();
 	xchg(&thiscpu->cpu_status, CPU_STARTED); // tell boot_aps() we're up
 

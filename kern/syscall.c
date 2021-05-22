@@ -74,6 +74,8 @@ sys_yield(void)
 // Returns envid of new environment, or < 0 on error.  Errors are:
 //	-E_NO_FREE_ENV if no free environment is available.
 //	-E_NO_MEM on memory exhaustion.
+// 创建一个新的进程，用户地址空间没有映射，不能运行，寄存器状态和父环境一致。
+// 在父进程中sys_exofork()返回新进程的envid，子进程返回0。
 static envid_t
 sys_exofork(void)
 {
@@ -96,7 +98,8 @@ sys_exofork(void)
 
 	// sys_exofork should return 0 in child environment by set register %eax with 0.Howerver,we set newEnv->env_tf 
 	// with ENV_NOT_RUNNABLE above,the new environment can't run util parent environment has allowed it explicitly.
-	// //返回值变成0
+	// 返回值变成0，这个reg_eax=0是fork的子进程返回env id为0的关键，因为eax中放的就是返回值，
+	// 所以父进程得到的是子进程的id，子进程得到的就是0
 	newEnv->env_tf.tf_regs.reg_eax = 0;
 	return newEnv->env_id;
 	// panic("sys_exofork not implemented");
@@ -109,6 +112,7 @@ sys_exofork(void)
 //	-E_BAD_ENV if environment envid doesn't currently exist,
 //		or the caller doesn't have permission to change envid.
 //	-E_INVAL if status is not a valid status for an environment.
+// 设置一个特定进程的状态为ENV_RUNNABLE或ENV_NOT_RUNNABLE。
 static int
 sys_env_set_status(envid_t envid, int status)
 {
@@ -139,6 +143,9 @@ sys_env_set_status(envid_t envid, int status)
 // Returns 0 on success, < 0 on error.  Errors are:
 //	-E_BAD_ENV if environment envid doesn't currently exist,
 //		or the caller doesn't have permission to change envid.
+// 该系统调用为指定的用户环境设置env_pgfault_upcall。
+// 缺页中断发生时，会执行env_pgfault_upcall指定位置的代码。当执行env_pgfault_upcall指定位置的代码时，
+// 栈已经转到异常栈，并且压入了UTrapframe结构。
 static int
 sys_env_set_pgfault_upcall(envid_t envid, void *func)
 {
@@ -168,6 +175,7 @@ sys_env_set_pgfault_upcall(envid_t envid, void *func)
 //	-E_INVAL if perm is inappropriate (see above).
 //	-E_NO_MEM if there's no memory to allocate the new page,
 //		or to allocate any necessary page tables.
+// 为特定进程分配一个物理页，映射指定线性地址va到该物理页
 static int
 sys_page_alloc(envid_t envid, void *va, int perm)
 {
@@ -220,6 +228,8 @@ sys_page_alloc(envid_t envid, void *va, int perm)
 //	-E_INVAL if (perm & PTE_W), but srcva is read-only in srcenvid's
 //		address space.
 //	-E_NO_MEM if there's no memory to allocate any necessary page tables.
+// 拷贝页表，使指定进程共享当前进程相同的映射关系。本质上是修改特定进程的页目录和页表。
+// 共享同样的地址空间，而不是拷贝page的内容
 static int
 sys_page_map(envid_t srcenvid, void *srcva,
 	     envid_t dstenvid, void *dstva, int perm)
@@ -263,6 +273,7 @@ sys_page_map(envid_t srcenvid, void *srcva,
 //	-E_BAD_ENV if environment envid doesn't currently exist,
 //		or the caller doesn't have permission to change envid.
 //	-E_INVAL if va >= UTOP, or va is not page-aligned.
+// 解除页映射关系。
 static int
 sys_page_unmap(envid_t envid, void *va)
 {
@@ -348,6 +359,7 @@ sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 			return -E_INVAL;
 		}
 		if((uintptr_t)targetEnv->env_ipc_dstva < UTOP){
+			// 共享相同的映射关系
 			if((r = page_insert(targetEnv->env_pgdir, pp, targetEnv->env_ipc_dstva, perm)) < 0) return r;
 			targetEnv->env_ipc_perm = perm;
 		}

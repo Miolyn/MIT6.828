@@ -427,12 +427,13 @@ page_fault_handler(struct Trapframe *tf)
 		utf->utf_fault_va = fault_va;
 		utf->utf_err = tf->tf_err;
 		utf->utf_regs = tf->tf_regs;
-		// 页错误处理程序入口
+		// 返回地址
 		utf->utf_eip = tf->tf_eip;
 		utf->utf_eflags = tf->tf_eflags;
 		utf->utf_esp = tf->tf_esp;
-
+		// 修改eip切换到env_pgfault_upcall的地址然后进入用户态执行env_pgfault_upcall代码处理缺页
 		tf->tf_eip = (uintptr_t)curenv->env_pgfault_upcall;
+		// 修改esp切换到用户异常栈
 		tf->tf_esp = stack_top;
 		env_run(curenv);
 	}

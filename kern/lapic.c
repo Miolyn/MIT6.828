@@ -67,15 +67,17 @@ lapic_init(void)
 
 	// lapicaddr is the physical address of the LAPIC's 4K MMIO
 	// region.  Map it in to virtual memory so we can access it.
-	// 分配lapic的IO内存？
+	// 分配lapic的IO内存
+	// 映射这个地址然后就可以用虚拟地址访问
 	lapic = mmio_map_region(lapicaddr, 4096);
 
 	// Enable local APIC; set spurious interrupt vector.
+	// 开启 伪中断
 	lapicw(SVR, ENABLE | (IRQ_OFFSET + IRQ_SPURIOUS));
 
 	// The timer repeatedly counts down at bus frequency
 	// from lapic[TICR] and then issues an interrupt.  
-	// If we cared more about precise timekeeping,
+	// If we cared more about precise timekeeping, //重负时间中断，可以用外面时钟来校准
 	// TICR would be calibrated using an external time source.
 	lapicw(TDCR, X1);
 	lapicw(TIMER, PERIODIC | (IRQ_OFFSET + IRQ_TIMER));
@@ -99,10 +101,10 @@ lapic_init(void)
 	if (((lapic[VER]>>16) & 0xFF) >= 4)
 		lapicw(PCINT, MASKED);
 
-	// Map error interrupt to IRQ_ERROR.
+	// Map error interrupt to IRQ_ERROR. 映射错误中断
 	lapicw(ERROR, IRQ_OFFSET + IRQ_ERROR);
 
-	// Clear error status register (requires back-to-back writes).
+	// Clear error status register (requires back-to-back writes). 清除寄存器
 	lapicw(ESR, 0);
 	lapicw(ESR, 0);
 
@@ -116,6 +118,7 @@ lapic_init(void)
 		;
 
 	// Enable interrupts on the APIC (but not on the processor).
+	// 启用 中断
 	lapicw(TPR, 0);
 }
 // cpunum() 总是返回调用它的那个 CPU 的 ID，它可以被用作是数组的索引，比如 cpus

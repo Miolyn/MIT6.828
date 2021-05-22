@@ -633,6 +633,7 @@ tlb_invalidate(pde_t *pgdir, void *va)
 // location.  Return the base of the reserved region.  size does *not*
 // have to be multiple of PGSIZE.
 //
+// 负责从MMIOBASE开始分配一定的内存，并将这块内存映射到指定的物理地址处，返回分配内存的起始的虚拟地址
 void *
 mmio_map_region(physaddr_t pa, size_t size)
 {
@@ -670,6 +671,7 @@ mmio_map_region(physaddr_t pa, size_t size)
 	base += size;
 	// panic("mmio_map_region not implemented");
 	//  Return the base of the reserved region
+	// 返回分配的虚拟地址的开始的地址
 	return (void *)(base - size);
 }
 

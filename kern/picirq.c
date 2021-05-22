@@ -12,6 +12,8 @@ uint16_t irq_mask_8259A = 0xFFFF & ~(1<<IRQ_SLAVE);
 static bool didinit;
 
 /* Initialize the 8259A interrupt controllers. */
+// 将0~15的IRQ编号映射到IDT表项 ，[IRQ_OFFSET ~ IRQ_OFFSET +15]。
+// IRQ_OFFSET的选择主要是为了设备中断不与处理器异常重叠。
 void
 pic_init(void)
 {

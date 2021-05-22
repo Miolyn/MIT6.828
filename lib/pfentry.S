@@ -34,6 +34,7 @@
 _pgfault_upcall:
 	// Call the C page fault handler.
 	pushl %esp			// function argument: pointer to UTF
+	// 调用页处理函数
 	movl _pgfault_handler, %eax
 	call *%eax
 	addl $4, %esp			// pop function argument

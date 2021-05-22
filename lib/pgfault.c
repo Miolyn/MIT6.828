@@ -8,6 +8,8 @@
 
 
 // Assembly language pgfault entrypoint defined in lib/pfentry.S.
+// 这个全局变量定义在pfentry.S文件中的 .globl _pgfault_upcall
+// 这个.S文件主要做的事就是从栈中的UTrapframe恢复用户环境，然后设置好环境切换到eip即env_pgfault_upcall进行处理
 extern void _pgfault_upcall(void);
 
 // Pointer to currently installed C-language pgfault handler.

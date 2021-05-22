@@ -26,6 +26,7 @@ pgfault(struct UTrapframe *utf)
 	//   (see <inc/memlayout.h>).
 
 	// LAB 4: Your code here.
+	// 只有写操作时 的写错误缺页异常 并且是 写时复制可以处理，其余情况都panic
 	if (!((err & FEC_WR) && (uvpt[PGNUM(addr)] & PTE_COW))) {
         panic("pgfault: not copy-on-write\n");
     }
@@ -38,11 +39,15 @@ pgfault(struct UTrapframe *utf)
 
 	// LAB 4: Your code here.
 	// envid_t envid = sys_getenvid();    // do not use thisenv!
+	// 为当前进程的PFTEMP地址处分配一块内存
 	if ((r = sys_page_alloc(0, PFTEMP, PTE_P|PTE_U|PTE_W)) < 0)
         panic("sys_page_alloc: %e", r);
+	// 将addr处的内容都移到PFTEMP处
 	memmove(PFTEMP, (void*)ROUNDDOWN(addr, PGSIZE), PGSIZE);
+	// 将addr地址映射到PFTEMP对应的物理地址处
     if ((r = sys_page_map(0, (void*)PFTEMP, 0, ROUNDDOWN(addr, PGSIZE), PTE_P|PTE_U|PTE_W)) < 0)
         panic("sys_page_map: %e", r);
+	// 取消PFTEMP虚拟地址的映射
     if ((r = sys_page_unmap(0, (void*)PFTEMP)) < 0)
         panic("sys_page_unmap: %e", r);
 	// panic("pgfault not implemented");
@@ -67,8 +72,14 @@ duppage(envid_t envid, unsigned pn)
 	// LAB 4: Your code here.
 	// envid_t parentEid = sys_getenvid();
 	uintptr_t pn_va = pn << PGSHIFT;
+	if (uvpt[pn] & PTE_SHARE) {
+		sys_page_map(0, (void*)pn_va, envid, (void*)pn_va, PTE_SYSCALL);		//对于表示为PTE_SHARE的页，拷贝映射关系，并且两个进程都有读写权限
+	} 
 	// if(uvpt[pn] & (PTE_W | PTE_COW)){
-	if((uvpt[pn] & PTE_W) || (uvpt[pn] & PTE_COW)){
+	// PTE_COW marks copy-on-write page table entries.
+	else if((uvpt[pn] & PTE_W) || (uvpt[pn] & PTE_COW)){
+		// 设置COW位并设置取消PTE_W设置为不可读。
+		// 对于UTOP以下的可写的或者写时拷贝的页，拷贝映射关系的同时，需要同时标记当前进程和子进程的页表项为PTE_COW
 		if((r = sys_page_map(0, (void*)pn_va, envid, (void*)pn_va, (PTE_COW | PTE_P | PTE_U)))){
 			return r;
 		}
@@ -76,6 +87,7 @@ duppage(envid_t envid, unsigned pn)
 			return r;
 		}
 	} else{
+		// 对于只读的页，只需要拷贝映射关系即可
 		if((r = sys_page_map(0, (void*)pn_va, envid, (void*) pn_va, (PTE_U | PTE_P)))){
 			return r;
 		}
@@ -109,7 +121,9 @@ fork(void)
 	uintptr_t addr;
 	extern volatile pde_t uvpd[];
     extern volatile pte_t uvpt[];
+	// 设置缺页处理函数
 	set_pgfault_handler(pgfault);
+	// 创建子进程
 	envid_t envid = sys_exofork();
 	if(envid < 0){
 		panic("sys_exofork: %e", envid);
@@ -130,15 +144,20 @@ fork(void)
 		// 所以uvpd可以根据索引获得第index的页目录，uvpt可以获取整个用户页表(1024*1024)
 	for (addr = (uintptr_t) UTEXT; addr < USTACKTOP; addr += PGSIZE){
 		size_t pn = PGNUM(addr);
+		// 所有存在的页且用户可写的页都要设置成共享页
 		if ((uvpd[PDX(addr)] & PTE_P) && (uvpt[pn] & PTE_P) && (uvpt[pn] & PTE_U)){
+			// 拷贝当前进程映射关系到子进程
 			duppage(envid, pn);
 		}
 	}
 	extern void _pgfault_upcall(void);
+	// 为子进程分配异常栈
 	if((r = sys_page_alloc(envid, (void *)(UXSTACKTOP-PGSIZE), PTE_P|PTE_U|PTE_W)) < 0)
         panic("sys_page_alloc: %e", r);
+	// 为子进程设置_pgfault_upcall，因为上面设置的是父进程的
     if ((r = sys_env_set_pgfault_upcall(envid, _pgfault_upcall) < 0))
         panic("sys_env_set_pgfault_upcall failed\n");
+	// 设置子进程状态为可运行状态
     if ((r = sys_env_set_status(envid, ENV_RUNNABLE)) < 0)
         panic("sys_env_set_status: %e", envid);
 

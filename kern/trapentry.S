@@ -214,6 +214,10 @@ _alltraps:
 /*
 发生异常后，处理器硬件会先进行一些寄存器的压入，完成后内核栈的内容为
 有error code 的时候：			没有error code 的时候：
+ - - - - - - - -			 	 - - - - - - - -
+| OLD ESP 		|				| OLD ESP 		|
+ - - - - - - - -			 	 - - - - - - - -
+|		|OLD SS |				|		|OLD SS |
  - - - - - - - -				 - - - - - - - -
 | OLD ELFAGS    |				| OLD ELFAGS    |
  - - - - - - - -				 - - - - - - - -
@@ -226,6 +230,8 @@ _alltraps:
 
 算上这个trapentry中操作系统做的事情，这个栈就会变成，这样就统一了格式了，完成了必要环境压栈后就调用操作系统的trap来分配异常处理函数
 有error code				 无error code
+ - - - - - - - -			 - - - - - - - -
+| OLD ESP 		|			| OLD ESP 		| 
  - - - - - - - -			 - - - - - - - -
 |		|OLD SS |			|		|OLD SS |
  - - - - - - - -			 - - - - - - - -
@@ -245,7 +251,7 @@ _alltraps:
  - - - - - - - -			 - - - - - - - -
 |PUSHAL(eax-edi)|			|PUSHAL(eax-edi)|
  - - - - - - - -			 - - - - - - - -
-| OLD ESP 		|			| OLD ESP 		|
+| OLD ESP 		|			| OLD ESP 		| // 这里的esp是相当于trap函数调用传递的参数
  - - - - - - - -			 - - - - - - - -
 
 */
