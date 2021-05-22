@@ -1,5 +1,8 @@
 #include <inc/mmu.h>
 
+# 在某个时刻，BIOS会加载磁盘的引导块，找到boot loader所在的boot.S文件，然后把它加载到物理内存0x7c00处，
+# 然后将计算机控制权交给它。
+# boot.S 回开启32 位保护模式(这样才能访问1MB以上的内存)然后跳转到C函数处继续执行
 # Start the CPU: switch to 32-bit protected mode, jump into C.
 # The BIOS loads this code from the first sector of the hard disk into
 # memory at physical address 0x7c00 and starts executing in real mode
@@ -12,7 +15,7 @@
 .globl start
 start:
   .code16                     # Assemble for 16-bit mode
-  cli                         # Disable interrupts
+  cli                         # Disable interrupts 关中断 这条指令在处0x7c00
   cld                         # String operations increment
 
   # Set up the important data segment registers (DS, ES, SS).
@@ -24,7 +27,8 @@ start:
   # Enable A20:
   #   For backwards compatibility with the earliest PCs, physical
   #   address line 20 is tied low, so that addresses higher than
-  #   1MB wrap around to zero by default.  This code undoes this.
+  #   1MB wrap around to zero by default.  This code undoes this. 
+  #   关掉A20功能，即关闭超过1MB的地址的地址会被绕回0的问题
 seta20.1:
   inb     $0x64,%al               # Wait for not busy
   testb   $0x2,%al
@@ -45,10 +49,10 @@ seta20.2:
   # and segment translation that makes virtual addresses 
   # identical to their physical addresses, so that the 
   # effective memory map does not change during the switch.
-  lgdt    gdtdesc
-  movl    %cr0, %eax
+  lgdt    gdtdesc                 # 设置gdt，加载全局描述符，段表
+  movl    %cr0, %eax              
   orl     $CR0_PE_ON, %eax
-  movl    %eax, %cr0
+  movl    %eax, %cr0              # 设置cr0进入保护模式，开启虚拟内存表明接下来的地址都是32位的虚拟地址，但现在暂时还是虚拟和实地址相同
   
   # Jump to next instruction, but in 32-bit code segment.
   # Switches processor into 32-bit mode.
@@ -65,8 +69,8 @@ protcseg:
   movw    %ax, %ss                # -> SS: Stack Segment
   
   # Set up the stack pointer and call into C.
-  movl    $start, %esp
-  call bootmain
+  movl    $start, %esp            # 设置了栈指针，esp就是指向boot的第一行,0x7c00
+  call bootmain                   # 调用bootmain，bios加载的另一个文件，main.C文件的一个c函数
 
   # If bootmain returns (it shouldn't), loop.
 spin:

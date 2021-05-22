@@ -65,6 +65,9 @@ static const char *trapname(int trapno)
 	return "(unknown trap)";
 }
 
+#define make_gate(name, is_trap, dpl) \
+	void name##_HANDLER (); \
+	SETGATE(idt[name], is_trap, GD_KT, name##_HANDLER, dpl)
 
 void
 trap_init(void)
@@ -72,7 +75,46 @@ trap_init(void)
 	extern struct Segdesc gdt[];
 
 	// LAB 3: Your code here.
+	extern long entryPointOfTraps[][2];
+	int i;
+	for(i = 0; i <= 26; ++i){
+		// if(entryPointOfTraps[i][1] == T_BRKPT || entryPointOfTraps[i][1] == T_SYSCALL){
+		if(entryPointOfTraps[i][1] == T_SYSCALL){
+			// istrap必须得设置为0，0 for an interrupt gate. istrap代表的是中断还是陷阱主要影响efalgs的IF位
+			// 如果是0即interrupt gate在穿过interrupt gate的时候会重置IF，即关中断，避免其他中断的影响
+			// 而trap类型在穿过trap gate的时候不会改变IF位，就不会关中断，所以如果IF位不重置，在trap的时候就会被assert拦截了
+			SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 3);
+		} 
+		else SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 0);
 
+		// 如果在用户程序中int 13想要触发缺页中断就将这个缺页的处理段设置为3用户态也能访问，但实际上这样是不科学的。
+		// 缺页只能由操作系统来进行处理，所以需要设置dpl为0，内核权限级。如果用户态想要触发缺页中断的话就会转变成int 13 General Protection
+		// else if(entryPointOfTraps[i][1] == T_PGFLT){
+		// 	SETGATE(idt[entryPointOfTraps[i][1]], 0, GD_KT, entryPointOfTraps[i][0], 3);
+		// }
+	}
+	/*
+	make_gate(T_DIVIDE, 0, 0);
+	make_gate(T_DEBUG, 0, 0);
+	make_gate(T_NMI, 0, 0);
+	make_gate(T_BRKPT, 1, 3);
+	make_gate(T_OFLOW, 0, 0);
+	make_gate(T_BOUND, 0, 0);
+	make_gate(T_ILLOP, 0, 0);
+	make_gate(T_DEVICE, 0, 0);
+	make_gate(T_DBLFLT, 0, 0);
+	make_gate(T_TSS, 0, 0);
+	make_gate(T_SEGNP, 0, 0);
+	make_gate(T_STACK, 0, 0);
+	make_gate(T_GPFLT, 0, 0);
+	make_gate(T_PGFLT, 0, 0);
+	make_gate(T_FPERR, 0, 0);
+	make_gate(T_ALIGN, 0, 0);
+	make_gate(T_MCHK, 0, 0);
+	make_gate(T_SIMDERR, 0, 0);
+	make_gate(T_SYSCALL, 1, 3);
+	make_gate(T_DEFAULT, 0, 0);
+	*/
 	// Per-CPU setup 
 	trap_init_percpu();
 }
@@ -95,7 +137,8 @@ trap_init_percpu(void)
 	//     rather than the global "ts" variable;
 	//   - Use gdt[(GD_TSS0 >> 3) + i] for CPU i's TSS descriptor;
 	//   - You mapped the per-CPU kernel stacks in mem_init_mp()
-	//
+	//   - Initialize cpu_ts.ts_iomb to prevent unauthorized environments
+	//     from doing IO (0 is not the correct value!)
 	// ltr sets a 'busy' flag in the TSS selector, so if you
 	// accidentally load the same TSS on more than one CPU, you'll
 	// get a triple fault.  If you set up an individual CPU's TSS
@@ -103,21 +146,31 @@ trap_init_percpu(void)
 	// user space on that CPU.
 	//
 	// LAB 4: Your code here:
-
+	
+	thiscpu->cpu_ts.ts_esp0 = KSTACKTOP - thiscpu->cpu_id * (KSTKSIZE + KSTKGAP);
+	// thiscpu->cpu_ts.ts_esp0 = (uintptr_t)percpu_kstacks[thiscpu->cpu_id];
+	thiscpu->cpu_ts.ts_ss0 = GD_KD;
+	thiscpu->cpu_ts.ts_iomb = sizeof(struct Taskstate);
 	// Setup a TSS so that we get the right stack
 	// when we trap to the kernel.
-	ts.ts_esp0 = KSTACKTOP;
-	ts.ts_ss0 = GD_KD;
+	// ts.ts_esp0 = KSTACKTOP;
+	// ts.ts_ss0 = GD_KD;
 
+	// GD_TSS0   0x28     // Task segment selector for CPU 0
 	// Initialize the TSS slot of the gdt.
-	gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
-					sizeof(struct Taskstate), 0);
-	gdt[GD_TSS0 >> 3].sd_s = 0;
+	// 段选择符分为3部分，从左到右第一部分是13bit的index，第二部分是1bit的TI表示描述符在LDT中，然后是2bit的RPL优先级
+	// 所以GD_TSS0的index就要先右移3bit
+	// 将TSS limit设置为sizeof(struct Taskstate) - 1 CPU就会忽略ts_iomb了
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts),
+					sizeof(struct Taskstate) - 1, 0);
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id].sd_s = 0;
 
+	// 可以通过 ltr指令跟上TSS段描述符的选择子来加载TSS段。该指令是特权指令，只能在特权级为0的情况下使用。
 	// Load the TSS selector (like other segment selectors, the
 	// bottom three bits are special; we leave them 0)
-	ltr(GD_TSS0);
-
+	// 为了装载正确的gdt就要加上这个CPU对应的index，所以要加到段选择符的index段上，因此cpu_id要右移3bit
+	ltr(GD_TSS0 + (thiscpu->cpu_id << 3));
+	
 	// Load the IDT
 	lidt(&idt_pd);
 }
@@ -173,6 +226,37 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
+	// cprintf("tf trapno:%d,trapname:%s\n", tf->tf_trapno, trapname(tf->tf_trapno));
+
+	switch (tf->tf_trapno)
+	{
+	case T_SYSCALL:
+		tf->tf_regs.reg_eax = syscall(
+			tf->tf_regs.reg_eax, 
+			tf->tf_regs.reg_edx, 
+			tf->tf_regs.reg_ecx, 
+			tf->tf_regs.reg_ebx, 
+			tf->tf_regs.reg_edi, 
+			tf->tf_regs.reg_esi
+		);
+		return;
+	case T_PGFLT:
+		page_fault_handler(tf);
+		return;
+	case T_BRKPT:
+		monitor(tf);
+		return;
+	case T_DEBUG:
+		monitor(tf);
+		return;
+	case IRQ_OFFSET + IRQ_TIMER:
+		lapic_eoi();
+		sched_yield();
+		return;
+	default:
+		// env_destroy(curenv);
+		break;
+	}
 
 	// Handle spurious interrupts
 	// The hardware sometimes raises these because of noise on the
@@ -203,6 +287,7 @@ trap_dispatch(struct Trapframe *tf)
 void
 trap(struct Trapframe *tf)
 {
+	// cprintf("tf trapno:%d,trapname:%s\n", tf->tf_trapno, trapname(tf->tf_trapno));
 	// The environment may have set DF and some versions
 	// of GCC rely on DF being clear
 	asm volatile("cld" ::: "cc");
@@ -226,6 +311,7 @@ trap(struct Trapframe *tf)
 		// Acquire the big kernel lock before doing any
 		// serious kernel work.
 		// LAB 4: Your code here.
+		lock_kernel();
 		assert(curenv);
 
 		// Garbage collect if current enviroment is a zombie
@@ -267,10 +353,16 @@ page_fault_handler(struct Trapframe *tf)
 
 	// Read processor's CR2 register to find the faulting address
 	fault_va = rcr2();
+	// LAB 3: Your code here.
 
 	// Handle kernel-mode page faults.
-
-	// LAB 3: Your code here.
+	// 虽然user/softint是通过int指令，想要触发page fault，
+	// 但是，由于user/softint运行在用户态下，
+	//而page fault的Interrupt descriptor中的DPL标识调用page fault的handler function需要内核级别特权，
+	// 即0，因此，根据Intel IA-32 developer’s manual，会由硬件检测出general protection exception
+	if((tf->tf_cs & 3) == 0){
+		panic(":( Your kernel triger a page fault at va@0x%08x !Bad kernel", fault_va);
+	}
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
@@ -302,8 +394,53 @@ page_fault_handler(struct Trapframe *tf)
 	//   user_mem_assert() and env_run() are useful here.
 	//   To change what the user environment runs, modify 'curenv->env_tf'
 	//   (the 'tf' variable points at 'curenv->env_tf').
-
+	
 	// LAB 4: Your code here.
+	if(curenv->env_pgfault_upcall){
+		uintptr_t stack_top;
+		if(curenv->env_tf.tf_esp >= UXSTACKTOP - PGSIZE && curenv->env_tf.tf_esp <= UXSTACKTOP - 1){
+			// the user environment is already running on the exception stack when an exception occurs.
+			// Thus,we should start the new stack frame just under the tf->tf_esp.We have to push a word
+			// at the top of the trap-time stack as a scratch space.
+			user_mem_assert(curenv, (void*)(curenv->env_tf.tf_esp - 4), 4, PTE_U | PTE_W);
+			stack_top = curenv->env_tf.tf_esp - 4;
+		} else{
+			stack_top = UXSTACKTOP;
+		}
+		stack_top -= sizeof(struct UTrapframe);
+		user_mem_assert(curenv, (void*)stack_top, sizeof(struct UTrapframe), PTE_U | PTE_W);
+		struct UTrapframe *utf = (struct UTrapframe*)stack_top;
+		/*
+<-- UXSTACKTOP
+    trap-time esp
+    trap-time eflags
+    trap-time eip
+    trap-time eax     start of struct PushRegs
+    trap-time ecx
+    trap-time edx
+    trap-time ebx
+    trap-time esp
+    trap-time ebp
+    trap-time esi
+    trap-time edi      end of struct PushRegs
+    tf_err (error code)
+    fault_va           <-- %esp when handler is run
+		*/
+		// faulting address
+		utf->utf_fault_va = fault_va;
+		utf->utf_err = tf->tf_err;
+		utf->utf_regs = tf->tf_regs;
+		// 返回地址
+		utf->utf_eip = tf->tf_eip;
+		utf->utf_eflags = tf->tf_eflags;
+		utf->utf_esp = tf->tf_esp;
+		// 修改eip切换到env_pgfault_upcall的地址然后进入用户态执行env_pgfault_upcall代码处理缺页
+		tf->tf_eip = (uintptr_t)curenv->env_pgfault_upcall;
+		// 修改esp切换到用户异常栈
+		tf->tf_esp = stack_top;
+		env_run(curenv);
+	}
+	
 
 	// Destroy the environment that caused the fault.
 	cprintf("[%08x] user fault va %08x ip %08x\n",

@@ -98,6 +98,9 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 	char padc;
 
 	while (1) {
+		// 将fmt转化为指向字节的指针，并把当前指向的字符赋值给ch，再指向下一个
+		// 如果ch为%，说明要进行转义输出
+		// 如果不是，直接调用putch输出到console
 		while ((ch = *(unsigned char *) fmt++) != '%') {
 			if (ch == '\0')
 				return;
@@ -105,15 +108,16 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		}
 
 		// Process a %-escape sequence
-		padc = ' ';
-		width = -1;
-		precision = -1;
-		lflag = 0;
-		altflag = 0;
+		padc = ' ';			// 填充字符：空格
+		width = -1;			// 字段宽度
+		precision = -1;		// 小数点精度
+		lflag = 0;			// long flag
+		altflag = 0;		// 更标准的显示进制数
 	reswitch:
 		switch (ch = *(unsigned char *) fmt++) {
 
 		// flag to pad on the right
+		// 结果左对齐，右边填空格
 		case '-':
 			padc = '-';
 			goto reswitch;
@@ -133,6 +137,7 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		case '7':
 		case '8':
 		case '9':
+			// 就是依次读取数字，转化成十进制数，读到不是数字时退出
 			for (precision = 0; ; ++fmt) {
 				precision = precision * 10 + ch - '0';
 				ch = *fmt;
@@ -140,8 +145,9 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 					break;
 			}
 			goto process_precision;
-
+		// printf("%*d\n",5,10); 这里的* 是控制数字前的空格数，比如这里就是输出5个空格
 		case '*':
+			// 从可变参数中取出一个int
 			precision = va_arg(ap, int);
 			goto process_precision;
 
@@ -160,6 +166,7 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 			goto reswitch;
 
 		// long flag (doubled for long long)
+		// 输出长类型数字
 		case 'l':
 			lflag++;
 			goto reswitch;
@@ -184,14 +191,19 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		case 's':
 			if ((p = va_arg(ap, char *)) == NULL)
 				p = "(null)";
+			// 如果设置了精度且padc不为‘-’
 			if (width > 0 && padc != '-')
+			// strnlen获取字符串s中实际字符个数，不包括结尾的'\0'；如果实际个数<=maxlen，则返回n，否则返回第二个参数。
+			// 将填不满精度部分的字符串用padc填充
 				for (width -= strnlen(p, precision); width > 0; width--)
 					putch(padc, putdat);
 			for (; (ch = *p++) != '\0' && (precision < 0 || --precision >= 0); width--)
+			// 若是标准输出则对于无法识别的char输出?
 				if (altflag && (ch < ' ' || ch > '~'))
 					putch('?', putdat);
 				else
 					putch(ch, putdat);
+			// 如果padc为'-'则是左对齐，右边填充空格
 			for (; width > 0; width--)
 				putch(' ', putdat);
 			break;
@@ -215,10 +227,10 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		// (unsigned) octal
 		case 'o':
 			// Replace this with your code.
-			putch('X', putdat);
-			putch('X', putdat);
-			putch('X', putdat);
-			break;
+			// putch('0', putdat);
+			num = getuint(&ap, lflag);
+			base = 8;
+			goto number;
 
 		// pointer
 		case 'p':
@@ -231,6 +243,8 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 
 		// (unsigned) hexadecimal
 		case 'x':
+			// putch('0', putdat);
+			// putch('x', putdat);
 			num = getuint(&ap, lflag);
 			base = 16;
 		number:

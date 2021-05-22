@@ -45,6 +45,13 @@
 physaddr_t lapicaddr;        // Initialized in mpconfig.c
 volatile uint32_t *lapic;
 
+/*
+在SMP系统中，每个cpu都有一个附带的局部高级可编程中断处理器LAPIC（local APIC：Advanced Programmable Interrupt Controller）。LAPIC负责在整个系统中传递中断。LAPIC为其所连接的cpu提供一个唯一的标识符。
+们使用LAPIC单元的三个基本功能：
+1、读取LAPIC标识符APIC ID以识别我们的代码当前运行在哪个cpu上。（见cpunum()）
+2、从BSP处发送STARTUP处理器间中断IPI（interprocessor interrupt）到APs，启动其他cpu。（见lapic_startap()）
+3、part C将编程LAPIC的内置计时器，触发时钟中断以支持抢占式多任务调度。（见apic_init()）
+*/
 static void
 lapicw(int index, int value)
 {
@@ -60,14 +67,17 @@ lapic_init(void)
 
 	// lapicaddr is the physical address of the LAPIC's 4K MMIO
 	// region.  Map it in to virtual memory so we can access it.
+	// 分配lapic的IO内存
+	// 映射这个地址然后就可以用虚拟地址访问
 	lapic = mmio_map_region(lapicaddr, 4096);
 
 	// Enable local APIC; set spurious interrupt vector.
+	// 开启 伪中断
 	lapicw(SVR, ENABLE | (IRQ_OFFSET + IRQ_SPURIOUS));
 
 	// The timer repeatedly counts down at bus frequency
 	// from lapic[TICR] and then issues an interrupt.  
-	// If we cared more about precise timekeeping,
+	// If we cared more about precise timekeeping, //重负时间中断，可以用外面时钟来校准
 	// TICR would be calibrated using an external time source.
 	lapicw(TDCR, X1);
 	lapicw(TIMER, PERIODIC | (IRQ_OFFSET + IRQ_TIMER));
@@ -91,10 +101,10 @@ lapic_init(void)
 	if (((lapic[VER]>>16) & 0xFF) >= 4)
 		lapicw(PCINT, MASKED);
 
-	// Map error interrupt to IRQ_ERROR.
+	// Map error interrupt to IRQ_ERROR. 映射错误中断
 	lapicw(ERROR, IRQ_OFFSET + IRQ_ERROR);
 
-	// Clear error status register (requires back-to-back writes).
+	// Clear error status register (requires back-to-back writes). 清除寄存器
 	lapicw(ESR, 0);
 	lapicw(ESR, 0);
 
@@ -108,9 +118,10 @@ lapic_init(void)
 		;
 
 	// Enable interrupts on the APIC (but not on the processor).
+	// 启用 中断
 	lapicw(TPR, 0);
 }
-
+// cpunum() 总是返回调用它的那个 CPU 的 ID，它可以被用作是数组的索引，比如 cpus
 int
 cpunum(void)
 {
@@ -166,6 +177,7 @@ lapic_startap(uint8_t apicid, uint32_t addr)
 	// when it is in the halted state due to an INIT.  So the second
 	// should be ignored, but it is part of the official Intel algorithm.
 	// Bochs complains about the second one.  Too bad for Bochs.
+	// 从 BSP 到 AP 之间发送处理器间中断（IPI） STARTUP，以启动其它 CPU
 	for (i = 0; i < 2; i++) {
 		lapicw(ICRHI, apicid << 24);
 		lapicw(ICRLO, STARTUP | (addr >> 12));

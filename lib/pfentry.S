@@ -34,6 +34,7 @@
 _pgfault_upcall:
 	// Call the C page fault handler.
 	pushl %esp			// function argument: pointer to UTF
+	// 调用页处理函数
 	movl _pgfault_handler, %eax
 	call *%eax
 	addl $4, %esp			// pop function argument
@@ -65,18 +66,41 @@ _pgfault_upcall:
 	// ways as registers become unavailable as scratch space.
 	//
 	// LAB 4: Your code here.
-
+	/*
+    trap-time esp
+    trap-time eflags
+    trap-time eip
+    trap-time eax     start of struct PushRegs
+    trap-time ecx
+    trap-time edx
+    trap-time ebx
+    trap-time esp
+    trap-time ebp
+    trap-time esi
+    trap-time edi      end of struct PushRegs
+    tf_err (error code)
+    fault_va           <-- %esp when handler is run
+	*/
+	movl 40(%esp), %eax 			// utf.eip放到eax里
+	subl $4, 48(%esp)     			// utf.esp -= 4
+	movl 48(%esp), %edx  			// 将减4之后的utf.esp放入edx中
+	movl %eax, (%edx) 				// 将utf.eip返回地址放到(utf.esp)中
+	addl $8, %esp					// 将当前esp设置到指向utf.edi
 	// Restore the trap-time registers.  After you do this, you
 	// can no longer modify any general-purpose registers.
 	// LAB 4: Your code here.
-
+	popal							// 将utf中的regs都存储到cpu的寄存器中，弹出后esp就指向了utf.eip了
 	// Restore eflags from the stack.  After you do this, you can
 	// no longer use arithmetic operations or anything else that
 	// modifies eflags.
 	// LAB 4: Your code here.
-
+	addl $4, %esp					// 将esp设置指向utf.eflags
+	popfl							// 将esp指向的内容弹出到eflags中，然后esp指向utf.esp
 	// Switch back to the adjusted trap-time stack.
 	// LAB 4: Your code here.
-
+	popl %esp						// 将utf.esp弹出到esp
 	// Return to re-execute the instruction that faulted.
 	// LAB 4: Your code here.
+	ret								// 然后返回，就可以返回到我们在utf.esp中设置的返回地址了
+
+

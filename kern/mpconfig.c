@@ -170,7 +170,8 @@ mp_init(void)
 	struct mpproc *proc;
 	uint8_t *p;
 	unsigned int i;
-
+	// 通过读取内存中位于 BIOS 区域里的 MP 配置表来获得这些信息。
+	// CPU0是引导程序处理器（BSP）
 	bootcpu = &cpus[0];
 	if ((conf = mpconfig(&mp)) == 0)
 		return;
