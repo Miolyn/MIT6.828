@@ -72,9 +72,11 @@ duppage(envid_t envid, unsigned pn)
 	// LAB 4: Your code here.
 	// envid_t parentEid = sys_getenvid();
 	uintptr_t pn_va = pn << PGSHIFT;
-	// if(uvpt[pn] & (PTE_W | PTE_COW)){
+	if ((uvpt[pn] & PTE_SHARE)) {
+		sys_page_map(0, pn_va, envid, pn_va, PTE_SYSCALL);
+	}
 	// PTE_COW marks copy-on-write page table entries.
-	if((uvpt[pn] & PTE_W) || (uvpt[pn] & PTE_COW)){
+	else if((uvpt[pn] & PTE_W) || (uvpt[pn] & PTE_COW)){
 		// 设置COW位并设置取消PTE_W设置为不可读。
 		// 对于UTOP以下的可写的或者写时拷贝的页，拷贝映射关系的同时，需要同时标记当前进程和子进程的页表项为PTE_COW
 		if((r = sys_page_map(0, (void*)pn_va, envid, (void*)pn_va, (PTE_COW | PTE_P | PTE_U)))){

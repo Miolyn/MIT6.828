@@ -193,6 +193,7 @@ init_stack(envid_t child, const char **argv, uintptr_t *init_esp)
 	// Count the number of arguments (argc)
 	// and the total amount of space needed for strings (string_size).
 	string_size = 0;
+	// 计算参数的字符串总长度
 	for (argc = 0; argv[argc] != 0; argc++)
 		string_size += strlen(argv[argc]) + 1;
 

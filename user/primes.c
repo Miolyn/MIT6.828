@@ -4,7 +4,7 @@
 // The picture halfway down the page and the text surrounding it
 // explain what's going on here.
 //
-// Since NENVS is 1024, we can print 1022 primes before running out.
+// Since NENV is 1024, we can print 1022 primes before running out.
 // The remaining two environments are the integer generator at the bottom
 // of main and user/idle.
 

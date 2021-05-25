@@ -59,6 +59,7 @@ ide_set_disk(int d)
 	diskno = d;
 }
 
+
 int
 ide_read(uint32_t secno, void *dst, size_t nsecs)
 {

@@ -90,7 +90,7 @@ openfile_lookup(envid_t envid, uint32_t fileid, struct OpenFile **po)
 	struct OpenFile *o;
 
 	o = &opentab[fileid % MAXOPEN];
-	if (pageref(o->o_fd) == 1 || o->o_fileid != fileid)
+	if (pageref(o->o_fd) <= 1 || o->o_fileid != fileid)
 		return -E_INVAL;
 	*po = o;
 	return 0;
@@ -124,12 +124,32 @@ serve_open(envid_t envid, struct Fsreq_open *req,
 	}
 	fileid = r;
 
-	if (req->req_omode != 0) {
-		if (debug)
-			cprintf("file_open omode 0x%x unsupported", req->req_omode);
-		return -E_INVAL;
+	// Open the file
+	if (req->req_omode & O_CREAT) {
+		if ((r = file_create(path, &f)) < 0) {
+			if (!(req->req_omode & O_EXCL) && r == -E_FILE_EXISTS)
+				goto try_open;
+			if (debug)
+				cprintf("file_create failed: %e", r);
+			return r;
+		}
+	} else {
+try_open:
+		if ((r = file_open(path, &f)) < 0) {
+			if (debug)
+				cprintf("file_open failed: %e", r);
+			return r;
+		}
 	}
 
+	// Truncate
+	if (req->req_omode & O_TRUNC) {
+		if ((r = file_set_size(f, 0)) < 0) {
+			if (debug)
+				cprintf("file_set_size failed: %e", r);
+			return r;
+		}
+	}
 	if ((r = file_open(path, &f)) < 0) {
 		if (debug)
 			cprintf("file_open failed: %e", r);
@@ -156,6 +176,29 @@ serve_open(envid_t envid, struct Fsreq_open *req,
 	return 0;
 }
 
+// Set the size of req->req_fileid to req->req_size bytes, truncating
+// or extending the file as necessary.
+int
+serve_set_size(envid_t envid, struct Fsreq_set_size *req)
+{
+	struct OpenFile *o;
+	int r;
+
+	if (debug)
+		cprintf("serve_set_size %08x %08x %08x\n", envid, req->req_fileid, req->req_size);
+
+	// Every file system IPC call has the same general structure.
+	// Here's how it goes.
+
+	// First, use openfile_lookup to find the relevant open file.
+	// On failure, return the error code to the client with ipc_send.
+	if ((r = openfile_lookup(envid, req->req_fileid, &o)) < 0)
+		return r;
+
+	// Second, call the relevant file system function (from fs/fs.c).
+	// On failure, return the error code to the client.
+	return file_set_size(o->o_file, req->req_size);
+}
 
 // Read at most ipc->read.req_n bytes from the current seek position
 // in ipc->read.req_fileid.  Return the bytes read from the file to
@@ -170,28 +213,42 @@ serve_read(envid_t envid, union Fsipc *ipc)
 	if (debug)
 		cprintf("serve_read %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
 
-	// Look up the file id, read the bytes into 'ret', and update
-	// the seek position.  Be careful if req->req_n > PGSIZE
-	// (remember that read is always allowed to return fewer bytes
-	// than requested).  Also, be careful because ipc is a union,
-	// so filling in ret will overwrite req.
-	//
-	struct OpenFile *o;
+	// Lab 5: Your code here:
 	int r;
-
+	struct OpenFile *o;
 	if ((r = openfile_lookup(envid, req->req_fileid, &o)) < 0)
 		return r;
-
-	if ((r = file_read(o->o_file, ret->ret_buf,
-			   MIN(req->req_n, sizeof ret->ret_buf),
-			   o->o_fd->fd_offset)) < 0)
+	if((r = file_read(o->o_file, ret->ret_buf, req->req_n, o->o_fd->fd_offset)) < 0){
 		return r;
-
+	}
 	o->o_fd->fd_offset += r;
 	return r;
 }
 
 
+// Write req->req_n bytes from req->req_buf to req_fileid, starting at
+// the current seek position, and update the seek position
+// accordingly.  Extend the file if necessary.  Returns the number of
+// bytes written, or < 0 on error.
+int
+serve_write(envid_t envid, struct Fsreq_write *req)
+{
+	if (debug)
+		cprintf("serve_write %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
+
+	// LAB 5: Your code here.
+	// panic("serve_write not implemented");
+	int r;
+	struct OpenFile *o;
+	if ((r = openfile_lookup(envid, req->req_fileid, &o)) < 0)
+		return r;
+
+	if((r = file_write(o->o_file, req->req_buf, req->req_n, o->o_fd->fd_offset)) < 0){
+		return r;
+	}
+	o->o_fd->fd_offset += r;
+	return r;
+}
 
 // Stat ipc->stat.req_fileid.  Return the file's struct Stat to the
 // caller in ipc->statRet.
@@ -215,11 +272,27 @@ serve_stat(envid_t envid, union Fsipc *ipc)
 	return 0;
 }
 
-
-// Our read-only file system do nothing for flush
+// Flush all data and metadata of req->req_fileid to disk.
 int
 serve_flush(envid_t envid, struct Fsreq_flush *req)
 {
+	struct OpenFile *o;
+	int r;
+
+	if (debug)
+		cprintf("serve_flush %08x %08x\n", envid, req->req_fileid);
+
+	if ((r = openfile_lookup(envid, req->req_fileid, &o)) < 0)
+		return r;
+	file_flush(o->o_file);
+	return 0;
+}
+
+
+int
+serve_sync(envid_t envid, union Fsipc *req)
+{
+	fs_sync();
 	return 0;
 }
 
@@ -231,8 +304,10 @@ fshandler handlers[] = {
 	[FSREQ_READ] =		serve_read,
 	[FSREQ_STAT] =		serve_stat,
 	[FSREQ_FLUSH] =		(fshandler)serve_flush,
+	[FSREQ_WRITE] =		(fshandler)serve_write,
+	[FSREQ_SET_SIZE] =	(fshandler)serve_set_size,
+	[FSREQ_SYNC] =		serve_sync
 };
-#define NHANDLERS (sizeof(handlers)/sizeof(handlers[0]))
 
 void
 serve(void)
@@ -258,7 +333,7 @@ serve(void)
 		pg = NULL;
 		if (req == FSREQ_OPEN) {
 			r = serve_open(whom, (struct Fsreq_open*)fsreq, &pg, &perm);
-		} else if (req < NHANDLERS && handlers[req]) {
+		} else if (req < ARRAY_SIZE(handlers) && handlers[req]) {
 			r = handlers[req](whom, fsreq);
 		} else {
 			cprintf("Invalid request code %d from %08x\n", req, whom);
@@ -282,6 +357,7 @@ umain(int argc, char **argv)
 
 	serve_init();
 	fs_init();
+        fs_test();
 	serve();
 }
 

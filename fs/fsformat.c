@@ -49,12 +49,12 @@ uint32_t *bitmap;
 void
 panic(const char *fmt, ...)
 {
-        va_list ap;
+	va_list ap;
 
-        va_start(ap, fmt);
-        vfprintf(stderr, fmt, ap);
-        va_end(ap);
-        fputc('\n', stderr);
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	fputc('\n', stderr);
 	abort();
 }
 
@@ -63,7 +63,7 @@ readn(int f, void *out, size_t n)
 {
 	size_t p = 0;
 	while (p < n) {
-		size_t m = read(f, out + p, n - p);
+		ssize_t m = read(f, out + p, n - p);
 		if (m < 0)
 			panic("read: %s", strerror(errno));
 		if (m == 0)
