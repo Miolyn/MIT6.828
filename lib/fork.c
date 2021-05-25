@@ -72,11 +72,11 @@ duppage(envid_t envid, unsigned pn)
 	// LAB 4: Your code here.
 	// envid_t parentEid = sys_getenvid();
 	uintptr_t pn_va = pn << PGSHIFT;
-	if ((uvpt[pn] & PTE_SHARE)) {
-		sys_page_map(0, pn_va, envid, pn_va, PTE_SYSCALL);
+	if (uvpt[pn] & PTE_SHARE) {
+		sys_page_map(0, (void*)pn_va, envid, (void*)pn_va, uvpt[pn] & PTE_SYSCALL);
 	}
-	// PTE_COW marks copy-on-write page table entries.
 	else if((uvpt[pn] & PTE_W) || (uvpt[pn] & PTE_COW)){
+		// PTE_COW marks copy-on-write page table entries.
 		// 设置COW位并设置取消PTE_W设置为不可读。
 		// 对于UTOP以下的可写的或者写时拷贝的页，拷贝映射关系的同时，需要同时标记当前进程和子进程的页表项为PTE_COW
 		if((r = sys_page_map(0, (void*)pn_va, envid, (void*)pn_va, (PTE_COW | PTE_P | PTE_U)))){
@@ -141,7 +141,7 @@ fork(void)
 		// env_pgdir[PDX(UVPT)]=[PDX(UVPT)]->PADDR(pgdir)
 		// UVPT=pd|pt|off, pd->PADDR(pgdir),pt->(UVPT>>12)*4(在pgdir页目录中，指向pgdir实地址的页目录项)
 		// 所以uvpd可以根据索引获得第index的页目录，uvpt可以获取整个用户页表(1024*1024)
-	for (addr = (uintptr_t) UTEXT; addr < USTACKTOP; addr += PGSIZE){
+	for (addr = (uintptr_t) 0; addr < USTACKTOP; addr += PGSIZE){
 		size_t pn = PGNUM(addr);
 		// 所有存在的页且用户可写的页都要设置成共享页
 		if ((uvpd[PDX(addr)] & PTE_P) && (uvpt[pn] & PTE_P) && (uvpt[pn] & PTE_U)){

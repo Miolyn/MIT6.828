@@ -79,7 +79,7 @@ trap_init(void)
 	int i;
 	for(i = 0; i <= 26; ++i){
 		// if(entryPointOfTraps[i][1] == T_BRKPT || entryPointOfTraps[i][1] == T_SYSCALL){
-		if(entryPointOfTraps[i][1] == T_SYSCALL){
+		if(entryPointOfTraps[i][1] == T_SYSCALL || entryPointOfTraps[i][1] == T_BRKPT){
 			// istrap必须得设置为0，0 for an interrupt gate. istrap代表的是中断还是陷阱主要影响efalgs的IF位
 			// 如果是0即interrupt gate在穿过interrupt gate的时候会重置IF，即关中断，避免其他中断的影响
 			// 而trap类型在穿过trap gate的时候不会改变IF位，就不会关中断，所以如果IF位不重置，在trap的时候就会被assert拦截了
@@ -252,6 +252,12 @@ trap_dispatch(struct Trapframe *tf)
 	case IRQ_OFFSET + IRQ_TIMER:
 		lapic_eoi();
 		sched_yield();
+		return;
+	case IRQ_OFFSET + IRQ_KBD:
+		kbd_intr();
+		return;
+	case IRQ_OFFSET + IRQ_SERIAL:
+		serial_intr();
 		return;
 	default:
 		// env_destroy(curenv);

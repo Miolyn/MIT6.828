@@ -15,6 +15,10 @@
         "lib.h": "c",
         "types.h": "c",
         "spinlock.h": "c",
-        "fs.h": "c"
+        "fs.h": "c",
+        "__config": "c",
+        "locale": "c",
+        "atomic": "c",
+        "sstream": "c"
     }
 }

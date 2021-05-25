@@ -202,17 +202,22 @@ init_stack(envid_t child, const char **argv, uintptr_t *init_esp)
 	// there later, then remap that page into the child environment
 	// at (USTACKTOP - PGSIZE).
 	// strings is the topmost thing on the stack.
+	// 计算string字符串该从栈的哪里开始放
+	// 现在是暂时将args放在UTEMP+PGSIZE栈顶处
 	string_store = (char*) UTEMP + PGSIZE - string_size;
 	// argv is below that.  There's one argument pointer per argument, plus
 	// a null pointer.
+	// 存放argv的地方，argv是char*指针，一共argc个再加上一共空指针标记着结束
 	argv_store = (uintptr_t*) (ROUNDDOWN(string_store, 4) - 4 * (argc + 1));
 
 	// Make sure that argv, strings, and the 2 words that hold 'argc'
 	// and 'argv' themselves will all fit in a single stack page.
+	// 还需要在栈上放argv和argc
 	if ((void*) (argv_store - 2) < (void*) UTEMP)
 		return -E_NO_MEM;
 
 	// Allocate the single stack page at UTEMP.
+	// 现在UTEMP处暂时分配一页内存
 	if ((r = sys_page_alloc(0, (void*) UTEMP, PTE_P|PTE_U|PTE_W)) < 0)
 		return r;
 
@@ -234,7 +239,10 @@ init_stack(envid_t child, const char **argv, uintptr_t *init_esp)
 	//	* Set *init_esp to the initial stack pointer for the child,
 	//	  (Again, use an address valid in the child's environment.)
 	for (i = 0; i < argc; i++) {
+		// ((void*) (addr) + (USTACKTOP - PGSIZE) - UTEMP)
+		// = addr - UTEMP + (USTACKTOP - PGSIZE)
 		argv_store[i] = UTEMP2USTACK(string_store);
+		// 将argv[i]复制到string_store处
 		strcpy(string_store, argv[i]);
 		string_store += strlen(argv[i]) + 1;
 	}
@@ -248,8 +256,10 @@ init_stack(envid_t child, const char **argv, uintptr_t *init_esp)
 
 	// After completing the stack, map it into the child's address space
 	// and unmap it from ours!
+	// 将UTEMP处的映射复制一份映射到(USTACKTOP - PGSIZE)处，即(USTACKTOP - PGSIZE)指向的page也是UTEMP指向的page
 	if ((r = sys_page_map(0, UTEMP, child, (void*) (USTACKTOP - PGSIZE), PTE_P | PTE_U | PTE_W)) < 0)
 		goto error;
+	// 取消UTEMP的映射
 	if ((r = sys_page_unmap(0, UTEMP)) < 0)
 		goto error;
 
@@ -302,6 +312,15 @@ static int
 copy_shared_pages(envid_t child)
 {
 	// LAB 5: Your code here.
+	uint32_t addr;
+	int r;
+	for(addr = 0; addr < UTOP; addr += PGSIZE){
+		if((uvpd[PDX(addr)] & PTE_P) && (uvpt[PGNUM(addr)] & PTE_P) && (uvpt[PGNUM(addr)] & PTE_SHARE)){
+			if((r = sys_page_map(0, (void*)addr, child, (void*)addr, uvpt[PGNUM(addr)] & PTE_SYSCALL)) < 0){
+				panic("in copy_shared_pages, sys_page_map%e", r);
+			}
+		}
+	}
 	return 0;
 }
 
