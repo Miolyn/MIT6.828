@@ -7,6 +7,24 @@
         "kdebug.h": "c",
         "console.h": "c",
         "monitor.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "memlayout.h": "c",
+        "mmu.h": "c",
+        "syscall.h": "c",
+        "pmap.h": "c",
+        "lib.h": "c",
+        "types.h": "c",
+        "spinlock.h": "c",
+        "fs.h": "c",
+        "__config": "c",
+        "locale": "c",
+        "atomic": "c",
+        "sstream": "c",
+        "istream": "c",
+        "*.tcc": "c",
+        "iosfwd": "c",
+        "limits": "c",
+        "stop_token": "c",
+        "streambuf": "c"
     }
 }

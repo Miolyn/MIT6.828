@@ -10,6 +10,7 @@
 #include <kern/console.h>
 #include <kern/monitor.h>
 #include <kern/kdebug.h>
+#include <kern/trap.h>
 
 #define CMDBUF_SIZE	80	// enough for one VGA text line
 
@@ -26,6 +27,9 @@ static struct Command commands[] = {
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
 	{ "test", "make some test about the lab", mon_test},
 	{ "backtrace", "Display function stack one line at a time", mon_backtrace},
+	{ "si", "Step instruction.", mon_stepi},
+	{ "c", "Continue.", mon_continue},
+
 };
 #define NCOMMANDS (sizeof(commands)/sizeof(commands[0]))
 
@@ -70,8 +74,7 @@ mon_kerninfo(int argc, char **argv, struct Trapframe *tf)
 }
 
 int
-mon_backtrace(int argc, char **argv, struct Trapframe *tf)
-{
+mon_backtrace(int argc, char **argv, struct Trapframe *tf){
 	cprintf("Stack backtrace:\n");
 	uint32_t *p = (uint32_t*)(&argc);
 	struct Eipdebuginfo info;	// 定义在kern/kdebug.h	
@@ -98,6 +101,24 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 
 
 	return 0;
+}
+
+int mon_stepi(int argc, char **argv, struct Trapframe *tf){
+	if(tf->tf_trapno == T_BRKPT || tf->tf_trapno == T_DEBUG){
+		// [Trap flag]   将该位设置为1以允许单步调试模式，清零则禁用该模式。
+		tf->tf_eflags |= FL_TF;
+	} else{
+		cprintf("You can only use stepi when the processor encounter Debug or Breakpoint exceptions.\n");
+	}
+	return -1;
+}
+
+
+int mon_continue(int argc, char **argv, struct Trapframe *tf){
+	if(tf->tf_trapno == T_BRKPT || tf->tf_trapno == T_DEBUG){
+		tf->tf_eflags &= ~FL_TF;
+	}
+	return -1;
 }
 
 
@@ -154,6 +175,8 @@ monitor(struct Trapframe *tf)
 	cprintf("Welcome to the JOS kernel monitor!\n");
 	cprintf("Type 'help' for a list of commands.\n");
 
+	if (tf != NULL)
+		print_trapframe(tf);
 
 	while (1) {
 		buf = readline("K> ");
