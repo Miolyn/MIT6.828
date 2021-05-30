@@ -115,6 +115,7 @@ devpipe_read(struct Fd *fd, void *vbuf, size_t n)
 
 	buf = vbuf;
 	for (i = 0; i < n; i++) {
+		// 若管道是空的，即读pos和写pos相等
 		while (p->p_rpos == p->p_wpos) {
 			// pipe is empty
 			// if we got any data, return it
@@ -130,6 +131,7 @@ devpipe_read(struct Fd *fd, void *vbuf, size_t n)
 		}
 		// there's a byte.  take it.
 		// wait to increment rpos until the byte is taken!
+		// 从Pipe的buf中获取一个字节
 		buf[i] = p->p_buf[p->p_rpos % PIPEBUFSIZ];
 		p->p_rpos++;
 	}
@@ -150,6 +152,7 @@ devpipe_write(struct Fd *fd, const void *vbuf, size_t n)
 
 	buf = vbuf;
 	for (i = 0; i < n; i++) {
+		// 管道已满，待写入的地方已经超出Pipe中的buf了
 		while (p->p_wpos >= p->p_rpos + sizeof(p->p_buf)) {
 			// pipe is full
 			// if all the readers are gone
@@ -164,6 +167,7 @@ devpipe_write(struct Fd *fd, const void *vbuf, size_t n)
 		}
 		// there's room for a byte.  store it.
 		// wait to increment wpos until the byte is stored!
+		// 向Pipe中的buf存储一个字节
 		p->p_buf[p->p_wpos % PIPEBUFSIZ] = buf[i];
 		p->p_wpos++;
 	}

@@ -51,10 +51,12 @@ umain(int argc, char **argv)
 
 	// being run directly from kernel, so no file descriptors open yet
 	close(0);
+	// 打开控制台，作为文件描述符0
 	if ((r = opencons()) < 0)
 		panic("opencons: %e", r);
 	if (r != 0)
 		panic("first opencons used fd %d", r);
+	// 复制一份文件描述符编程文件描述符1
 	if ((r = dup(0, 1)) < 0)
 		panic("dup: %e", r);
 	while (1) {

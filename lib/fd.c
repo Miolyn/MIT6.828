@@ -47,6 +47,7 @@ fd2data(struct Fd *fd)
 // Returns 0 on success, < 0 on error.  Errors are:
 //	-E_MAX_FD: no more file descriptors
 // On error, *fd_store is set to 0.
+// 找到一个最小的没有被映射的文件描述符，否则说明这个程序的文件描述符已经开满了
 int
 fd_alloc(struct Fd **fd_store)
 {
@@ -54,6 +55,8 @@ fd_alloc(struct Fd **fd_store)
 	struct Fd *fd;
 
 	for (i = 0; i < MAXFD; i++) {
+		// #define FDTABLE		0xD0000000
+		// #define INDEX2FD(i)	((struct Fd*) (FDTABLE + (i)*PGSIZE))
 		fd = INDEX2FD(i);
 		if ((uvpd[PDX(fd)] & PTE_P) == 0 || (uvpt[PGNUM(fd)] & PTE_P) == 0) {
 			*fd_store = fd;
@@ -70,6 +73,7 @@ fd_alloc(struct Fd **fd_store)
 // Returns 0 on success (the page is in range and mapped), < 0 on error.
 // Errors are:
 //	-E_INVAL: fdnum was either not in range or not mapped.
+// 找到第fdnum个文件描述符，并将fd结构体放在fd_store中
 int
 fd_lookup(int fdnum, struct Fd **fd_store)
 {
@@ -80,6 +84,7 @@ fd_lookup(int fdnum, struct Fd **fd_store)
 			cprintf("[%08x] bad fd %d\n", thisenv->env_id, fdnum);
 		return -E_INVAL;
 	}
+	// 获取第fd个文件描述符的地址
 	fd = INDEX2FD(fdnum);
 	if (!(uvpd[PDX(fd)] & PTE_P) || !(uvpt[PGNUM(fd)] & PTE_P)) {
 		if (debug)
@@ -97,15 +102,19 @@ fd_lookup(int fdnum, struct Fd **fd_store)
 // If 'must_exist' is 1, then fd_close returns -E_INVAL when passed a
 // closed or nonexistent file descriptor.
 // Returns 0 on success, < 0 on error.
+// 关闭并释放fd文件描述符
 int
 fd_close(struct Fd *fd, bool must_exist)
 {
 	struct Fd *fd2;
 	struct Dev *dev;
 	int r;
+	// 查看该文件描述符是否存在
 	if ((r = fd_lookup(fd2num(fd), &fd2)) < 0
 	    || fd != fd2)
 		return (must_exist ? r : 0);
+	// 查找文件描述符代表的相应的设备，例：如果是文件类型的设备，则fd_dev_id是'f'
+	// 找到对应设备之后就将该设备关闭。
 	if ((r = dev_lookup(fd->fd_dev_id, &dev)) >= 0) {
 		if (dev->dev_close)
 			r = (*dev->dev_close)(fd);
@@ -122,7 +131,7 @@ fd_close(struct Fd *fd, bool must_exist)
 // --------------------------------------------------------------
 // File functions
 // --------------------------------------------------------------
-
+// 3中设备，文件设备，管道设备，还有控制台设备
 static struct Dev *devtab[] =
 {
 	&devfile,
@@ -131,10 +140,12 @@ static struct Dev *devtab[] =
 	0
 };
 
+// 根据设备id查找相应的设备
 int
 dev_lookup(int dev_id, struct Dev **dev)
 {
 	int i;
+	// 查找设备表，看要找的设备id对应哪个设备
 	for (i = 0; devtab[i]; i++)
 		if (devtab[i]->dev_id == dev_id) {
 			*dev = devtab[i];
@@ -165,11 +176,13 @@ close_all(void)
 		close(i);
 }
 
-// Make file descriptor 'newfdnum' a duplicate of file descriptor 'oldfdnum'.
+// Make file descriptor 'newfdnum' a duplicate(复制) of file descriptor 'oldfdnum'.
 // For instance, writing onto either file descriptor will affect the
 // file and the file offset of the other.
 // Closes any previously open file descriptor at 'newfdnum'.
 // This is implemented using virtual memory tricks (of course!).
+// 让newfdnum成为oldfdnum的一个复制，修改其中一个的文件描述符会影响到另外一个的文件描述符代表的文件
+// 这是一种虚拟内存的使用技巧，只需要将两个fdnum对应的虚拟内存映射到同一个物理页上即可完成操作
 int
 dup(int oldfdnum, int newfdnum)
 {
@@ -177,7 +190,7 @@ dup(int oldfdnum, int newfdnum)
 	char *ova, *nva;
 	pte_t pte;
 	struct Fd *oldfd, *newfd;
-
+	// 获取旧的文件描述符
 	if ((r = fd_lookup(oldfdnum, &oldfd)) < 0)
 		return r;
 	close(newfdnum);
@@ -200,6 +213,7 @@ err:
 	return r;
 }
 
+// 从文件描述符fd读取字节，这就是调用文件描述表示的设备的操作接口dev_read
 ssize_t
 read(int fdnum, void *buf, size_t n)
 {
@@ -219,6 +233,7 @@ read(int fdnum, void *buf, size_t n)
 	return (*dev->dev_read)(fd, buf, n);
 }
 
+// 可能从一个文件描述符上不能一次性读取很多bytes，所以需要用readn这种方式通过多次读取来完成读取想要的字节数的效果
 ssize_t
 readn(int fdnum, void *buf, size_t n)
 {
@@ -233,7 +248,7 @@ readn(int fdnum, void *buf, size_t n)
 	}
 	return tot;
 }
-
+// 向文件描述符中写数据，即调用文件描述符对应设备的dev_write
 ssize_t
 write(int fdnum, const void *buf, size_t n)
 {
@@ -256,6 +271,7 @@ write(int fdnum, const void *buf, size_t n)
 	return (*dev->dev_write)(fd, buf, n);
 }
 
+// 将文件描述符对应的偏移量修改
 int
 seek(int fdnum, off_t offset)
 {
@@ -268,6 +284,7 @@ seek(int fdnum, off_t offset)
 	return 0;
 }
 
+// 重新设定文件描述符对应的文件大小
 int
 ftruncate(int fdnum, off_t newsize)
 {
@@ -287,6 +304,7 @@ ftruncate(int fdnum, off_t newsize)
 	return (*dev->dev_trunc)(fd, newsize);
 }
 
+// 获取文件描述符对应的设备状态
 int
 fstat(int fdnum, struct Stat *stat)
 {
@@ -306,6 +324,7 @@ fstat(int fdnum, struct Stat *stat)
 	return (*dev->dev_stat)(fd, stat);
 }
 
+// 获取对应路径path的文件的状态，然后关闭该文件，就是一个暂时获取一个文件状态的函数
 int
 stat(const char *path, struct Stat *stat)
 {

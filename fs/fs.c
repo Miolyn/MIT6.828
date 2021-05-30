@@ -37,6 +37,7 @@ block_is_free(uint32_t blockno)
 }
 
 // Mark a block free in the bitmap
+// 释放一个block，将其标记为free
 void
 free_block(uint32_t blockno)
 {
@@ -54,6 +55,7 @@ free_block(uint32_t blockno)
 // -E_NO_DISK if we are out of blocks.
 //
 // Hint: use free_block as an example for manipulating the bitmap.
+// 从bitmap中找到一个没有分配的磁盘块，然后将其标记为in-use
 int
 alloc_block(void)
 {
@@ -67,7 +69,7 @@ alloc_block(void)
 	for(i = 0; i < super->s_nblocks; i++){
 		if(block_is_free(i)){
 			bitmap[i/32] ^= 1<<(i%32);
-			// flush_block((void*)&bitmap[i / 32]);
+			flush_block((void*)&bitmap[i / 32]);
 			return i;
 		}
 	}
@@ -142,6 +144,9 @@ fs_init(void)
 //
 // Analogy: This is like pgdir_walk for files.
 // Hint: Don't forget to clear any block you allocate.
+// 查找f指向文件结构的第filebno个block的存储地址，保存到ppdiskbno中。如果f->f_indirect还没有分配，
+// 且alloc为真，那么将分配要给新的block作为该文件的f->f_indirect。类比页表管理的pgdir_walk()。
+// 其中ppdiskbno保存的不是blockno而是保存 保存blockno的uint32的地址
 static int
 file_block_walk(struct File *f, uint32_t filebno, uint32_t **ppdiskbno, bool alloc)
 {
@@ -150,6 +155,7 @@ file_block_walk(struct File *f, uint32_t filebno, uint32_t **ppdiskbno, bool all
 	if(filebno >= NDIRECT + NINDIRECT){
 		return -E_INVAL;
 	}
+	// 若要找到blockno在可以直接寻址的block中
 	if(filebno < NDIRECT){
 		*ppdiskbno = &(f->f_direct[filebno]);
 	} else{
@@ -162,6 +168,7 @@ file_block_walk(struct File *f, uint32_t filebno, uint32_t **ppdiskbno, bool all
 			if((blockno = alloc_block()) < 0){
 				return -E_NO_DISK;
 			}
+			// f_indirect保存的是对应的磁盘block
 			f->f_indirect = blockno;
 			flush_block(diskaddr(blockno));
 			uint32_t *addr = diskaddr(blockno);
@@ -179,6 +186,8 @@ file_block_walk(struct File *f, uint32_t filebno, uint32_t **ppdiskbno, bool all
 //	-E_INVAL if filebno is out of range.
 //
 // Hint: Use file_block_walk and alloc_block.
+// 在File文件中获取该文件的第filebno个block，并将block的内存中地址存入blk中
+// 如果第filebno个block并没有分配磁盘空间，则给这个block分配磁盘空间
 int
 file_get_block(struct File *f, uint32_t filebno, char **blk)
 {
@@ -205,7 +214,7 @@ file_get_block(struct File *f, uint32_t filebno, char **blk)
 //
 // Returns 0 and sets *file on success, < 0 on error.  Errors are:
 //	-E_NOT_FOUND if the file is not found
-// 在File dir中寻找名称为name的文件
+// 在File dir中寻找名称为name的文件，并将这个File存储到file中
 static int
 dir_lookup(struct File *dir, const char *name, struct File **file)
 {
@@ -290,6 +299,8 @@ skip_slash(const char *p)
 // If we cannot find the file but find the directory
 // it should be in, set *pdir and copy the final path
 // element into lastelem.
+// 遍历路径path，看能否找到path对应的文件，如果找到了就将最后的目录File赋值给pgdir，把找到的文件赋值给pf
+// 若没找到则把最后找不到的文件名称赋值给lastelem，并将最后遍历到的目录路File赋值给pgdir
 static int
 walk_path(const char *path, struct File **pdir, struct File **pf, char *lastelem)
 {
@@ -353,6 +364,7 @@ walk_path(const char *path, struct File **pdir, struct File **pf, char *lastelem
 
 // Create "path".  On success set *pf to point at the file and return 0.
 // On error return < 0.
+// 创建一个路径为path的文件，并将File赋值给pf
 int
 file_create(const char *path, struct File **pf)
 {
@@ -363,6 +375,7 @@ file_create(const char *path, struct File **pf)
 	// 若文件已存在则报错
 	if ((r = walk_path(path, &dir, &f, name)) == 0)
 		return -E_FILE_EXISTS;
+	// 除了文件已存在的其他报错
 	if (r != -E_NOT_FOUND || dir == 0)
 		return r;
 	// 在dir目录下分配一个文件f
@@ -377,6 +390,7 @@ file_create(const char *path, struct File **pf)
 
 // Open "path".  On success set *pf to point at the file and return 0.
 // On error return < 0.
+// 打开路径path的文件，并将文件File赋值给pf
 int
 file_open(const char *path, struct File **pf)
 {
@@ -386,6 +400,7 @@ file_open(const char *path, struct File **pf)
 // Read count bytes from f into buf, starting from seek position
 // offset.  This meant to mimic the standard pread function.
 // Returns the number of bytes read, < 0 on error.
+// 从文件file中读取count个字节的内容，并且偏移量是offset，将内容写入buf中，最后返回读取的字节数
 ssize_t
 file_read(struct File *f, void *buf, size_t count, off_t offset)
 {
@@ -395,13 +410,16 @@ file_read(struct File *f, void *buf, size_t count, off_t offset)
 
 	if (offset >= f->f_size)
 		return 0;
-
+	// 确定真实可读取的字节数量
 	count = MIN(count, f->f_size - offset);
-
+	// 从offset开始读取count个字节
 	for (pos = offset; pos < offset + count; ) {
+		// 根据pos确定在文件上是哪个blockno，然后获取对应block在内存上的地址blk
 		if ((r = file_get_block(f, pos / BLKSIZE, &blk)) < 0)
 			return r;
+		// 判断能从这个block上读取多少个字节
 		bn = MIN(BLKSIZE - pos % BLKSIZE, offset + count - pos);
+		// 将磁盘上对应block的字节读取到buf中
 		memmove(buf, blk + pos % BLKSIZE, bn);
 		pos += bn;
 		buf += bn;
@@ -415,6 +433,7 @@ file_read(struct File *f, void *buf, size_t count, off_t offset)
 // offset.  This is meant to mimic the standard pwrite function.
 // Extends the file if necessary.
 // Returns the number of bytes written, < 0 on error.
+// 在文件File中写入字节，从文件offset开始写入count个字节，内容在buf中
 int
 file_write(struct File *f, const void *buf, size_t count, off_t offset)
 {
@@ -423,10 +442,11 @@ file_write(struct File *f, const void *buf, size_t count, off_t offset)
 	char *blk;
 
 	// Extend file if necessary
+	// 判断要写的内容是否超出了文件大小，如果超出了就使用file_set_size额外给文件分配空间，设定新的大小
 	if (offset + count > f->f_size)
 		if ((r = file_set_size(f, offset + count)) < 0)
 			return r;
-
+	// 将内容写入文件对应位置
 	for (pos = offset; pos < offset + count; ) {
 		if ((r = file_get_block(f, pos / BLKSIZE, &blk)) < 0)
 			return r;
@@ -441,14 +461,16 @@ file_write(struct File *f, const void *buf, size_t count, off_t offset)
 
 // Remove a block from file f.  If it's not there, just silently succeed.
 // Returns 0 on success, < 0 on error.
+// 释放File对应filebno的磁盘空间
 static int
 file_free_block(struct File *f, uint32_t filebno)
 {
 	int r;
 	uint32_t *ptr;
-
+	// 在file中找到对应filebno的block在内存中的地址
 	if ((r = file_block_walk(f, filebno, &ptr, 0)) < 0)
 		return r;
+	// 如果存在则释放
 	if (*ptr) {
 		free_block(*ptr);
 		*ptr = 0;
@@ -465,6 +487,8 @@ file_free_block(struct File *f, uint32_t filebno)
 // (Remember to clear the f->f_indirect pointer so you'll know
 // whether it's valid!)
 // Do not change f->f_size.
+// 若新的文件大小小于旧的则把多出来的block全部释放，若新的文件大小甚至用不上非直接block块(f_indirect)则释放f_indirect
+// 不需要为多出来的size分配block，因为在用file get block的时候，如果对应的block没有分配磁盘空间，他自己就会自动分配了
 static void
 file_truncate_blocks(struct File *f, off_t newsize)
 {
@@ -484,6 +508,7 @@ file_truncate_blocks(struct File *f, off_t newsize)
 }
 
 // Set the size of file f, truncating or extending as necessary.
+// 为文件f设置新的文件大小
 int
 file_set_size(struct File *f, off_t newsize)
 {
@@ -498,6 +523,7 @@ file_set_size(struct File *f, off_t newsize)
 // Loop over all the blocks in file.
 // Translate the file block number into a disk block number
 // and then check whether that disk block is dirty.  If so, write it out.
+// 将文件内容从内存写回到磁盘中
 void
 file_flush(struct File *f)
 {
@@ -517,6 +543,7 @@ file_flush(struct File *f)
 
 
 // Sync the entire file system.  A big hammer.
+// 刷新整个磁盘内容，从内存写到磁盘中
 void
 fs_sync(void)
 {

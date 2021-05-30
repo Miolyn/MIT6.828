@@ -33,6 +33,8 @@ struct Fd {
 	int fd_omode;
 	union {
 		// File server files
+		// fd_file用于发送的时候传入服务器对应的fileid
+		// eg：o->o_fd->fd_file.id = o->o_fileid;
 		struct FdFile fd_file;
 	};
 };

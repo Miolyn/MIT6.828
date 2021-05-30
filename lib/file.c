@@ -12,6 +12,7 @@ union Fsipc fsipcbuf __attribute__((aligned(PGSIZE)));
 // type: request code, passed as the simple integer IPC value.
 // dstva: virtual address at which to receive reply page, 0 if none.
 // Returns result from the file server.
+// 使用进程间通信向文件系统服务器发送文件相关操作的请求。
 static int
 fsipc(unsigned type, void *dstva)
 {
@@ -23,8 +24,10 @@ fsipc(unsigned type, void *dstva)
 
 	if (debug)
 		cprintf("[%08x] fsipc %d %08x\n", thisenv->env_id, type, *(uint32_t *)&fsipcbuf);
-
+	// 向对方发送一个进程间通信的请求，value是type即请求服务类型，发送的一页内容是fsipcbuf，这一页将会插入对方的虚拟内存中，
+	// 并且页权限是perm=PTE_P | PTE_W | PTE_U
 	ipc_send(fsenv, type, &fsipcbuf, PTE_P | PTE_W | PTE_U);
+	// 然后接收到一个进程间通信的回信，接受的目标地址是dstva，即接收到的页会被插入到本进程的dstva处
 	return ipc_recv(NULL, dstva, NULL);
 }
 
@@ -51,6 +54,7 @@ struct Dev devfile =
 // 	The file descriptor index on success
 // 	-E_BAD_PATH if the path is too long (>= MAXPATHLEN)
 // 	< 0 for other errors.
+// 打开一个文件，模式为mode，返回的是文件描述符的编号
 int
 open(const char *path, int mode)
 {
@@ -73,13 +77,13 @@ open(const char *path, int mode)
 
 	if (strlen(path) >= MAXPATHLEN)
 		return -E_BAD_PATH;
-
+	// 分配一个文件描述符
 	if ((r = fd_alloc(&fd)) < 0)
 		return r;
 
 	strcpy(fsipcbuf.open.req_path, path);
 	fsipcbuf.open.req_omode = mode;
-
+	// 最终结果存放在fd文件描述符中
 	if ((r = fsipc(FSREQ_OPEN, fd)) < 0) {
 		fd_close(fd, 0);
 		return r;
@@ -145,6 +149,7 @@ devfile_write(struct Fd *fd, const void *buf, size_t n)
 	int r;
 	if(n > sizeof(fsipcbuf.write.req_buf))
 		n = sizeof(fsipcbuf.write.req_buf);
+	// 将要写的内容放到请求体中
 	memmove(fsipcbuf.write.req_buf, buf, n);
 	fsipcbuf.write.req_n = n;
 	fsipcbuf.write.req_fileid = fd->fd_file.id;

@@ -19,6 +19,12 @@
         "__config": "c",
         "locale": "c",
         "atomic": "c",
-        "sstream": "c"
+        "sstream": "c",
+        "istream": "c",
+        "*.tcc": "c",
+        "iosfwd": "c",
+        "limits": "c",
+        "stop_token": "c",
+        "streambuf": "c"
     }
 }

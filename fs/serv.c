@@ -31,8 +31,11 @@
 
 struct OpenFile {
 	uint32_t o_fileid;	// file id
+	// 打开的文件描述符 一个File数据结构指向一块内存指向一块磁盘，这部分内存对于文件服务器来说是私有的
 	struct File *o_file;	// mapped descriptor for open file
+	// 打开模式
 	int o_mode;		// open mode
+	// 这部分被保存到它自己的页上，对于所有打开这个文件的env来说是共享的
 	struct Fd *o_fd;	// Fd page
 };
 
@@ -52,7 +55,9 @@ void
 serve_init(void)
 {
 	int i;
+	// #define FILEVA		0xD0000000
 	uintptr_t va = FILEVA;
+	// #define MAXOPEN		1024
 	for (i = 0; i < MAXOPEN; i++) {
 		opentab[i].o_fileid = i;
 		opentab[i].o_fd = (struct Fd*) va;
@@ -67,16 +72,23 @@ openfile_alloc(struct OpenFile **o)
 	int i, r;
 
 	// Find an available open-file table entry
+	// 遍历所有OpenFile找到一个可以分配的OpenFile
 	for (i = 0; i < MAXOPEN; i++) {
+		// 查看对应的o_fd FD_Page是否存在， 0是不存在，!=0的时候获取到的是pages[PGNUM(pte)].pp_ref;即对应页被引用次数
 		switch (pageref(opentab[i].o_fd)) {
+		// 若该内存地址指向的物理页没有被引用过，相当于这个地址没有物理页
 		case 0:
+		// 映射指定的内存地址opentab[i].o_fd到一个分配的物理页
 			if ((r = sys_page_alloc(0, opentab[i].o_fd, PTE_P|PTE_U|PTE_W)) < 0)
 				return r;
 			/* fall through */
+			// 掉入下一个case中
+		// 若该内存地址指向的物理页只被引用了一次，相当于有物理页，且只被一个虚拟地址引用
 		case 1:
 			opentab[i].o_fileid += MAXOPEN;
 			*o = &opentab[i];
 			memset(opentab[i].o_fd, 0, PGSIZE);
+			// 返回对应fileid
 			return (*o)->o_fileid;
 		}
 	}
@@ -117,6 +129,7 @@ serve_open(envid_t envid, struct Fsreq_open *req,
 	path[MAXPATHLEN-1] = 0;
 
 	// Find an open file ID
+	// 分配一个空闲的OpenFile，即OpenFile中的文件描述符fd没有分配对应的物理页
 	if ((r = openfile_alloc(&o)) < 0) {
 		if (debug)
 			cprintf("openfile_alloc failed: %e", r);
@@ -125,14 +138,19 @@ serve_open(envid_t envid, struct Fsreq_open *req,
 	fileid = r;
 
 	// Open the file
+	// 如果打开模式是可以创建模式
 	if (req->req_omode & O_CREAT) {
+		// 尝试创建文件
 		if ((r = file_create(path, &f)) < 0) {
+			// 若打开模式不是存在则报错，且文件已存在，则尝试打开文件
 			if (!(req->req_omode & O_EXCL) && r == -E_FILE_EXISTS)
 				goto try_open;
 			if (debug)
 				cprintf("file_create failed: %e", r);
+				// 返回文件描述符
 			return r;
 		}
+	// 否则尝试是否可以打开文件
 	} else {
 try_open:
 		if ((r = file_open(path, &f)) < 0) {
@@ -143,6 +161,7 @@ try_open:
 	}
 
 	// Truncate
+	// 如果打开模式是要将文件大小清零，则清空文件大小
 	if (req->req_omode & O_TRUNC) {
 		if ((r = file_set_size(f, 0)) < 0) {
 			if (debug)
@@ -150,6 +169,7 @@ try_open:
 			return r;
 		}
 	}
+	// 如果是其他模式则尝试打开文件
 	if ((r = file_open(path, &f)) < 0) {
 		if (debug)
 			cprintf("file_open failed: %e", r);
@@ -157,9 +177,12 @@ try_open:
 	}
 
 	// Save the file pointer
+	// 保存File指针到文件描述符中
 	o->o_file = f;
 
 	// Fill out the Fd structure
+	// 设置文件描述符的fd
+	// 在文件描述符fd中存储对应OpenFile的id
 	o->o_fd->fd_file.id = o->o_fileid;
 	o->o_fd->fd_omode = req->req_omode & O_ACCMODE;
 	o->o_fd->fd_dev_id = devfile.dev_id;
@@ -170,7 +193,9 @@ try_open:
 
 	// Share the FD page with the caller by setting *pg_store,
 	// store its permission in *perm_store
+	// 返回结果文件描述符存储在
 	*pg_store = o->o_fd;
+	// 设置页权限
 	*perm_store = PTE_P|PTE_U|PTE_W|PTE_SHARE;
 
 	return 0;
@@ -192,6 +217,7 @@ serve_set_size(envid_t envid, struct Fsreq_set_size *req)
 
 	// First, use openfile_lookup to find the relevant open file.
 	// On failure, return the error code to the client with ipc_send.
+	// 使用Openfile_lookup找到对应的OpenFile，主要靠的是req->req_fileid即文件描述符中存储的OpenFileId
 	if ((r = openfile_lookup(envid, req->req_fileid, &o)) < 0)
 		return r;
 
@@ -216,8 +242,10 @@ serve_read(envid_t envid, union Fsipc *ipc)
 	// Lab 5: Your code here:
 	int r;
 	struct OpenFile *o;
+	// 获取对应打开的文件描述符
 	if ((r = openfile_lookup(envid, req->req_fileid, &o)) < 0)
 		return r;
+	// 读取文件内容到返回的buf中
 	if((r = file_read(o->o_file, ret->ret_buf, req->req_n, o->o_fd->fd_offset)) < 0){
 		return r;
 	}
@@ -318,6 +346,10 @@ serve(void)
 
 	while (1) {
 		perm = 0;
+		// ipc_recv(envid_t *from_env_store, void *pg, int *perm_store) -> value
+		// 返回值req是获取的值value
+		// 客户端使用ipc_send会发送一个共享页，即fsreq。简单将这个发送共享页的过程就是接收方使用ipc_recv设定了接受的共享页后，
+		// 发送方就可以成功发送了，然后将物理页插入到接收方的fsreq虚拟地址处，他们共享的是同一个物理地址，虽然对应的虚拟地址不同
 		req = ipc_recv((int32_t *) &whom, fsreq, &perm);
 		if (debug)
 			cprintf("fs req %d from %08x [page %08x: %s]\n",
@@ -331,8 +363,10 @@ serve(void)
 		}
 
 		pg = NULL;
+		// 如果是打开文件的请求，单独处理，这个请求比较特殊因为他要传递页面
 		if (req == FSREQ_OPEN) {
 			r = serve_open(whom, (struct Fsreq_open*)fsreq, &pg, &perm);
+			// 其他的则通过对应的处理函数来处理请求
 		} else if (req < ARRAY_SIZE(handlers) && handlers[req]) {
 			r = handlers[req](whom, fsreq);
 		} else {
@@ -344,6 +378,8 @@ serve(void)
 	}
 }
 
+// 文件系统程序，对外提供文件系统服务的接口，本质上是通过IPC机制来实现进程间通信给其他进程提供文件系统服务的。
+// 如此以来就能保证只有文件系统进程可以控制IO，保证权限安全
 void
 umain(int argc, char **argv)
 {
@@ -354,8 +390,9 @@ umain(int argc, char **argv)
 	// Check that we are able to do I/O
 	outw(0x8A00, 0x8A00);
 	cprintf("FS can do I/O\n");
-
+	// 初始化文件描述符
 	serve_init();
+	// 初始化文件系统
 	fs_init();
         fs_test();
 	serve();

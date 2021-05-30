@@ -2,6 +2,7 @@
 #include "fs.h"
 
 // Return the virtual address of this disk block.
+// 将块block号转换成在内存中的虚拟地址，即从DISKMAP基址开始根据块号和块大小计算的地址
 void*
 diskaddr(uint32_t blockno)
 {
@@ -11,6 +12,7 @@ diskaddr(uint32_t blockno)
 }
 
 // Is this virtual address mapped?
+// 查看虚拟地址va是否有映射，即是否加载到内存中
 bool
 va_is_mapped(void *va)
 {
@@ -29,6 +31,7 @@ va_is_dirty(void *va)
 
 // Fault any disk block that is read in to memory by
 // loading it from disk.
+// FS进程缺页处理函数，负责将数据从磁盘读取到对应的内存。
 static void
 bc_pgfault(struct UTrapframe *utf)
 {
@@ -37,11 +40,13 @@ bc_pgfault(struct UTrapframe *utf)
 	int r;
 
 	// Check that the fault was within the block cache region
+	// 查看缺页的虚拟地址是否在磁盘的虚拟地址范围
 	if (addr < (void*)DISKMAP || addr >= (void*)(DISKMAP + DISKSIZE))
 		panic("page fault in FS: eip %08x, va %08x, err %04x",
 		      utf->utf_eip, addr, utf->utf_err);
 
 	// Sanity check the block number.
+	// 查看对应的块号是否合理
 	if (super && blockno >= super->s_nblocks)
 		panic("reading non-existent block %08x\n", blockno);
 
@@ -52,9 +57,11 @@ bc_pgfault(struct UTrapframe *utf)
 	//
 	// LAB 5: you code here:
 	addr = (void*)ROUNDDOWN(addr, PGSIZE);
+	// 在addr分配一块地址
 	if((r = sys_page_alloc(0, addr, (PTE_U | PTE_P | PTE_W))) < 0){
 		panic("in bc_pgfault, sys_page_alloc: %e", r);
 	}
+	// 将磁盘中对应位置的内容读取到addr内存中
 	if((r = ide_read(blockno * BLKSECTS, addr, BLKSECTS)) < 0){
 		panic("in bc_pgfault, sys_page_alloc: %e", r);
 	}

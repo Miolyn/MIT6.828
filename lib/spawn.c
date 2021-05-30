@@ -16,6 +16,8 @@ static int copy_shared_pages(envid_t child);
 // argv: pointer to null-terminated array of pointers to strings,
 // 	 which will be passed to the child as its command-line arguments.
 // Returns child envid on success, < 0 on failure.
+// 从文件系统加载用户程序，然后启动这个进程来运行这个程序
+// 类似于fork然后立刻exec
 int
 spawn(const char *prog, const char **argv)
 {
@@ -99,6 +101,7 @@ spawn(const char *prog, const char **argv)
 	}
 
 	// Create new child environment
+	// 创建子进程
 	if ((r = sys_exofork()) < 0)
 		return r;
 	child = r;
@@ -106,7 +109,7 @@ spawn(const char *prog, const char **argv)
 	// Set up trap frame, including initial stack.
 	child_tf = envs[ENVX(child)].env_tf;
 	child_tf.tf_eip = elf->e_entry;
-
+	// 初始化栈，将调用参数都放入栈中，参数最后都压入了USTACKTOP中
 	if ((r = init_stack(child, argv, &child_tf.tf_esp)) < 0)
 		return r;
 

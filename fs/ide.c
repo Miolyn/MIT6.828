@@ -59,7 +59,7 @@ ide_set_disk(int d)
 	diskno = d;
 }
 
-
+// 填空、简答，解释，发挥
 int
 ide_read(uint32_t secno, void *dst, size_t nsecs)
 {
